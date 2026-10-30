@@ -1,0 +1,111 @@
+//! AOS microkernel (SPEC part 2).
+//!
+//! B-0: boot on QEMU `virt` (aarch64), serial console, exception vectors, kernel page tables.
+
+#![no_std]
+#![no_main]
+#![deny(unsafe_op_in_unsafe_fn)]
+// Until B-1, parts of the B-0 infrastructure (probes, unmap, the frame allocator API) are
+// used only by the kernel tests; the ktest build still reports dead code.
+#![cfg_attr(not(feature = "ktest"), allow(dead_code))]
+
+#[macro_use]
+mod console;
+#[cfg(feature = "ktest")]
+#[macro_use]
+mod ktest;
+
+mod arch;
+mod fdt;
+mod mm;
+mod pl011;
+mod sync;
+
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use mm::region::{Region, RegionList};
+
+/// QEMU `virt` places the DTB at the start of RAM for bare-metal (non-Linux) ELF boots.
+const QEMU_VIRT_DTB_PA: usize = 0x4000_0000;
+/// QEMU `virt` PL011, used until the device tree has been read.
+const QEMU_VIRT_UART_PA: usize = 0x0900_0000;
+
+/// What boot discovered. The DTB stays reserved and mapped, so borrowed strings live forever.
+pub struct BootInfo {
+    pub platform: fdt::Platform<'static>,
+    /// Physical range of the DTB.
+    pub dtb: Region,
+    /// Exception level the kernel was entered at.
+    pub entry_el: u64,
+}
+
+static BOOT_INFO: sync::SetOnce<BootInfo> = sync::SetOnce::new();
+
+pub fn boot_info() -> &'static BootInfo {
+    BOOT_INFO.get().expect("boot info not recorded yet")
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn kernel_main(dtb_pa: usize) -> ! {
+    console::init(mm::phys_to_virt(QEMU_VIRT_UART_PA));
+    let entry_el = arch::boot::entry_el();
+    kprintln!(
+        "AOS microkernel {} (entered at EL{entry_el}, running at EL{})",
+        env!("CARGO_PKG_VERSION"),
+        arch::cpu::current_el()
+    );
+
+    let dtb_pa = if dtb_pa == 0 { QEMU_VIRT_DTB_PA } else { dtb_pa };
+    // SAFETY: the boot map covers PA [1 GiB, 4 GiB), where QEMU places the DTB; the DTB is
+    // reserved below and never written, so it outlives the kernel.
+    let fdt = unsafe { fdt::Fdt::from_ptr(mm::phys_to_virt(dtb_pa) as *const u8) }
+        .unwrap_or_else(|e| panic!("no usable device tree at {dtb_pa:#x}: {e:?}"));
+    let platform = fdt::Platform::discover(&fdt).unwrap_or_else(|e| panic!("device tree: {e:?}"));
+    let uart_pa = platform.uart.unwrap_or_else(|| panic!("device tree has no arm,pl011 UART"));
+    if uart_pa != QEMU_VIRT_UART_PA {
+        console::init(mm::phys_to_virt(uart_pa));
+    }
+    for r in platform.memory.as_slice() {
+        kprintln!("  ram {:#011x}..{:#011x} ({} MiB)", r.start, r.end, r.len() >> 20);
+    }
+
+    let dtb = Region::new(dtb_pa, dtb_pa + fdt.total_size());
+    let mut reserved: RegionList<9> = RegionList::new();
+    let rsvmap = fdt.reservations().unwrap_or_else(|e| panic!("device tree reservations: {e:?}"));
+    for r in core::iter::once(&dtb).chain(rsvmap.as_slice()) {
+        reserved.push(*r).unwrap_or_else(|_| unreachable!("capacity covers the DTB and 8 reservations"));
+    }
+    let stats = mm::init(&platform, reserved.as_slice(), uart_pa).unwrap_or_else(|e| panic!("mm: {e}"));
+    kprintln!(
+        "mm: kernel address space active ({} KiB of page tables, {} MiB free)",
+        stats.table_frames * 4,
+        stats.free_bytes >> 20
+    );
+
+    if BOOT_INFO.set(BootInfo { platform, dtb, entry_el }).is_err() {
+        unreachable!("kernel_main runs once");
+    }
+
+    #[cfg(feature = "ktest")]
+    ktest::run_all();
+
+    #[cfg(not(feature = "ktest"))]
+    {
+        kprintln!("boot complete (B-0)");
+        arch::cpu::halt()
+    }
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo<'_>) -> ! {
+    static PANICKING: AtomicBool = AtomicBool::new(false);
+    if PANICKING.swap(true, Ordering::Relaxed) {
+        arch::cpu::halt(); // panicked while panicking
+    }
+    console::print_unlocked(format_args!("\n*** KERNEL PANIC: {info}\n"));
+    #[cfg(feature = "ktest")]
+    arch::semihosting::exit(101);
+    #[cfg(not(feature = "ktest"))]
+    arch::cpu::halt()
+}

@@ -1,0 +1,27 @@
+[package]
+name = "aos-kernel"
+description = "AOS capability microkernel (SPEC part 2)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+# Separate workspace: the kernel always builds for aarch64-unknown-none-softfloat
+# (.cargo/config.toml) and has no dependencies.
+[workspace]
+
+[features]
+# In-kernel unit tests, run by scripts/ktest.sh. Also enables the semihosting exit call.
+ktest = []
+
+[[bin]]
+name = "aos-kernel"
+test = false
+bench = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+debug = true
