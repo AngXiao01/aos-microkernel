@@ -1,0 +1,16 @@
+# Host-testable core libraries (no_std + alloc). The kernel is a separate workspace under
+# kernel/ because it builds for a fixed bare-metal target (see DECISIONS.md).
+[workspace]
+resolver = "3"
+members = ["core/aos-types"]
+exclude = ["kernel"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace.dependencies]
+sha2 = { version = "0.10", default-features = false }
+proptest = "1"
