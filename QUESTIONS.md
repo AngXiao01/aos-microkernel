@@ -1,0 +1,40 @@
+# QUESTIONS
+
+SPEC.md 内部的矛盾与缺口（§0）。每条记录出处和当前选择；选择取更保守的一方（更少权限、更多可撤销）。
+
+## Q1 能力类型缺 CNode
+
+- 出处：§B3.1 的能力类型列表里没有 CNode；§B3.4 要求参考 seL4 的 CNode 能力空间。
+- 选择：B-2 增加 CNode 能力类型，只用来组织能力空间，不带来新的权限。
+- 状态：已在 B-2 实现（单级、256 槽），见 DECISIONS 2026-10-31。
+
+## Q2 MCP 入口放在哪个进程
+
+- 出处：§B8 说 MCP 经 view server 的入站端口提供；§B4 中 view server 只持有 graph server 的 human 端点，而 MCP 工具（§13.1）需要 agent 端点。
+- 选择（更少权限）：不给 view server 增加 agent 端点。B-6 单独设一个 MCP 进程，只持有自己端口的入站监听能力和 graph server 的 agent 端点。偏离 §B4 表格的部分届时写入 DECISIONS。
+
+## Q3 用户意图经过不可信的 view server
+
+- 出处：P5 规定只有用户直接输入的意图是指令；§5.2、§13.2 又把 view server 和屏幕视为不可信，而意图正是从 view server 输入的。被攻破的 view server 可以伪造 `user` 意图和 `user` 身份的写入。
+- 现状：仍在威胁模型之内。最坏结果是可撤销的内部修改，出口由 iPhone 把关。v1 不因此阻塞。
+- 选择：`task_capabilities` 审批（§12.3）的 summary 里包含意图原文，让用户在可信显示屏上看到被授权的究竟是什么意图。
+
+## Q4 E2E-ML 的确认次数
+
+- 出处：§15.6 要求整个流程确认 ≤ 3 次，且待确认的出口意图恰好 3 个；§9.2.3 规定任务能力超出常设规则时，任务开始时还要再确认一次。
+- 选择：E2E-ML 使用的测试常设规则覆盖该任务的能力组；另写一个测试，覆盖"能力超出规则 → 多 1 次确认"的路径。
+
+## Q5 备选 TLS 方案覆盖不到确认服务
+
+- 出处：§B7 的备选 `embedded-tls` 只有 TLS 1.3 客户端；§12.5 要求 confirm service 作为 TLS 服务端。
+- 选择：`embedded-tls` 只能作为 egress gateway 的备选；confirm service 必须使用 rustls 的 `no_std` 服务端模式。B-4 的技术验证同时验证服务端握手。
+
+## Q6 动作能否读时钟
+
+- 出处：§8.3.2 写"没有时钟以外的系统调用"，暗示动作可以读时钟；§8.4 的宿主 ABI 却没有时钟调用。动作若能读墙钟，撤销与重放的一致性测试（§16.1）就不再确定。
+- 选择（更少能力）：宿主 ABI 不提供时钟。动作需要时间时，由运行时把当前事务的时间戳作为只读输入提供（同一事务内固定）。
+
+## Q7 deny 规则里 `max_sensitivity` 的含义
+
+- 出处：§9.3 的示例里，`allow: { channel: "model:default", max_sensitivity: internal }` 的意思是"敏感度不超过 internal 时放行"；而 `deny: { channel: "*", max_sensitivity: secret }` 按字面是"不超过 secret 时拒绝"，那就会拒绝一切出口，显然不是本意。
+- 选择：拆成两个条件。`sensitivity_at_most` 用于 allow/confirm，`sensitivity_at_least` 用于 deny；示例中的 deny 规则读作"敏感度达到 secret 时拒绝"。两种读法都不会放出 secret 数据，这样读的拒绝范围更窄但明确。

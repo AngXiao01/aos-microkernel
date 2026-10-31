@@ -1,0 +1,15 @@
+[package]
+name = "aos-confirm"
+description = "Approval requests, confirmer signatures, single-use approvals (SPEC §12, M3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# A software confirmer for tests and development (SPEC §12.7). Never in a release build.
+dev-confirmer = []
+
+[dependencies]
+aos-types = { path = "../aos-types" }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }

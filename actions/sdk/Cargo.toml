@@ -1,0 +1,10 @@
+[package]
+name = "aos-action-sdk"
+description = "Guest side of the AOS host ABI for WASM actions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../../core/aos-types" }

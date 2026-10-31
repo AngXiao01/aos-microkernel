@@ -1,0 +1,34 @@
+# Host-testable core libraries (no_std + alloc). The kernel is a separate workspace under
+# kernel/ because it builds for a fixed bare-metal target (see DECISIONS.md).
+[workspace]
+resolver = "3"
+members = [
+    "core/aos-types",
+    "core/aos-log",
+    "core/aos-branch",
+    "core/aos-cap",
+    "core/aos-action",
+    "core/aos-runtime",
+    "core/aos-policy",
+    "core/aos-confirm",
+    "core/aos-egress",
+    "core/aos-storage",
+    "tests/conformance",
+    "tests/platform",
+]
+exclude = ["kernel", "services"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace.dependencies]
+sha2 = { version = "0.10", default-features = false }
+proptest = "1"
+
+# Dependencies (p256 signing, sha2, wasmi) are optimized even in test builds; the property
+# tests sign and hash tens of thousands of times.
+[profile.dev.package."*"]
+opt-level = 2

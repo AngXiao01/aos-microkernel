@@ -1,0 +1,10 @@
+[package]
+name = "aos-rt"
+description = "User-space runtime: entry point, system calls, debug output"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-abi = { path = "../../kernel/abi" }

@@ -1,0 +1,13 @@
+[package]
+name = "aos-test-script"
+description = "A scripted action: performs the operations listed in its input (runtime tests)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-action-sdk = { path = "../sdk" }

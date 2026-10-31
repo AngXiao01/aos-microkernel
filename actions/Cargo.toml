@@ -1,0 +1,20 @@
+# WASM actions (SPEC §8.4): core modules for wasm32-unknown-unknown that import only the
+# AOS host ABI. sdk/ is the guest library; test-script/ drives the runtime's tests.
+[workspace]
+resolver = "3"
+members = ["sdk", "test-script"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"

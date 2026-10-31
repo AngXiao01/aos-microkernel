@@ -1,0 +1,10 @@
+[package]
+name = "aos-policy"
+description = "Standing policies and their evaluation: deny > confirm > allow (SPEC §9.3, M3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }

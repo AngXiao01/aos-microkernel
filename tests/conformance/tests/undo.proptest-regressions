@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b21829f715a727de957bb2b7ff1abee1b59bd2dbc257c840c2e3bb44b65d8b1c # shrinks to steps = [Set { fork: false, obj: 0, n: 0 }, Set { fork: false, obj: 0, n: 0 }, Revert { fork: false, pick: 0 }, Set { fork: false, obj: 0, n: 0 }, Set { fork: false, obj: 0, n: 0 }, Set { fork: false, obj: 0, n: 0 }]

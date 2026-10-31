@@ -1,0 +1,10 @@
+[package]
+name = "aos-log"
+description = "Append-only, hash-chained log with pluggable storage (SPEC §7.1, M1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }

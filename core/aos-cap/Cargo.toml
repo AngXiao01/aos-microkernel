@@ -1,0 +1,11 @@
+[package]
+name = "aos-cap"
+description = "Capability tokens: issue, attenuate, verify, charge, revoke (SPEC §9.1, M2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }

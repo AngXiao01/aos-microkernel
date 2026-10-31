@@ -1,0 +1,19 @@
+[package]
+name = "aos-runtime"
+description = "WASM action runtime enforcing declared effects (SPEC §8.3–8.4, M2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }
+aos-log = { path = "../aos-log" }
+aos-branch = { path = "../aos-branch" }
+aos-action = { path = "../aos-action" }
+aos-cap = { path = "../aos-cap" }
+aos-egress = { path = "../aos-egress" }
+wasmi = { version = "0.40", default-features = false }
+
+[dev-dependencies]
+wat = "1"
