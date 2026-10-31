@@ -46,6 +46,8 @@ impl Attrs {
     pub const USER_RX: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | AP_RO | NG | PXN);
     pub const USER_RO: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | AP_RO | NG | PXN | UXN);
     pub const USER_RW: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | NG | PXN | UXN);
+    /// MMIO a user driver may touch: device memory, EL0 read/write, never executable.
+    pub const USER_DEVICE: Attrs = Attrs(attr_index(MAIR_DEVICE) | AP_EL0 | NG | PXN | UXN);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

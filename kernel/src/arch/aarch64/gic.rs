@@ -57,6 +57,11 @@ pub fn enable(intid: u32) {
     write(&GICD, GICD_ISENABLER + 4 * (i / 32), 1 << (i % 32));
 }
 
+pub fn disable(intid: u32) {
+    let i = intid as usize;
+    write(&GICD, GICD_ICENABLER + 4 * (i / 32), 1 << (i % 32));
+}
+
 /// Acknowledges the highest-priority pending interrupt; `None` if it was spurious.
 pub fn acknowledge() -> Option<u32> {
     let iar = read(&GICC, GICC_IAR);

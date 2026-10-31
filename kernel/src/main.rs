@@ -20,6 +20,7 @@ mod arch;
 mod cap;
 #[cfg(feature = "ktest")]
 mod cap_tests;
+mod device;
 mod elf;
 mod fdt;
 mod invoke;
@@ -66,7 +67,27 @@ macro_rules! service {
 }
 
 /// The programs the root task receives (built from services/ by build.rs).
-pub static BOOT_MODULES: [root::Module; 2] = [service!("root"), service!("memory")];
+#[cfg(not(feature = "ktest"))]
+pub static BOOT_MODULES: [root::Module; 5] =
+    [service!("root"), service!("memory"), service!("blk"), service!("hostlink"), service!("storage")];
+
+/// The kernel tests also carry the user-space test program. blk/hostlink/storage are present
+/// but the root task only starts them when the machine actually has those devices.
+#[cfg(feature = "ktest")]
+pub static BOOT_MODULES: [root::Module; 6] = [
+    service!("root"),
+    service!("memory"),
+    service!("blk"),
+    service!("hostlink"),
+    service!("storage"),
+    service!("ktest-user"),
+];
+
+fn read_mmio(pa: usize) -> u32 {
+    // SAFETY: `pa` is a virtio-mmio register in the boot map (this runs before `mm::init`
+    // replaces it). The read has no side effect: magic and device id are pure.
+    unsafe { (mm::phys_to_virt(pa) as *const u32).read_volatile() }
+}
 
 pub fn boot_info() -> &'static BootInfo {
     BOOT_INFO.get().expect("boot info not recorded yet")
@@ -88,6 +109,23 @@ extern "C" fn kernel_main(dtb_pa: usize) -> ! {
     let fdt = unsafe { fdt::Fdt::from_ptr(mm::phys_to_virt(dtb_pa) as *const u8) }
         .unwrap_or_else(|e| panic!("no usable device tree at {dtb_pa:#x}: {e:?}"));
     let platform = fdt::Platform::discover(&fdt).unwrap_or_else(|e| panic!("device tree: {e:?}"));
+    // The boot map still covers MMIO here. Only transports with a real virtio device are
+    // published; empty virtio-mmio slots (device id 0) are ignored.
+    let mut found = [device::BootDev { kind: 0, base: 0, irq: 0 }; device::MAX];
+    let mut nfound = 0;
+    for node in platform.virtio.iter().take(platform.virtio_count) {
+        if nfound == device::MAX {
+            break;
+        }
+        let magic = read_mmio(node.base);
+        let id = read_mmio(node.base + 8);
+        if magic == 0x7472_6976 && (id == 2 || id == 3) {
+            found[nfound] = device::BootDev { kind: id, base: node.base, irq: node.irq };
+            kprintln!("virtio: id {id} at {:#x} irq {}", node.base, node.irq);
+            nfound += 1;
+        }
+    }
+    device::publish(&found[..nfound]);
     let uart_pa = platform.uart.unwrap_or_else(|| panic!("device tree has no arm,pl011 UART"));
     if uart_pa != QEMU_VIRT_UART_PA {
         console::init(mm::phys_to_virt(uart_pa));

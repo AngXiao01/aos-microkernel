@@ -11,7 +11,8 @@ fn main() {
     // the user target. The test kernel also carries the test programs.
     let services = dir.join("../services");
     let target_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("services");
-    let mut packages = vec!["-p", "aos-root", "-p", "aos-memory"];
+    let mut packages =
+        vec!["-p", "aos-root", "-p", "aos-memory", "-p", "aos-blk", "-p", "aos-hostlink", "-p", "aos-storage-server"];
     if std::env::var_os("CARGO_FEATURE_KTEST").is_some() {
         packages.extend(["-p", "aos-ktest-user"]);
     }
@@ -34,7 +35,7 @@ fn main() {
     assert!(status.success(), "building services/ failed");
     let bins = target_dir.join("aarch64-unknown-none/release");
     println!("cargo:rustc-env=AOS_SERVICES_DIR={}", bins.display());
-    for path in ["Cargo.toml", "rt", "ktest-user", "root", "memory"] {
+    for path in ["Cargo.toml", "rt", "ktest-user", "root", "memory", "virtio", "blk", "hostlink", "storage"] {
         println!("cargo:rerun-if-changed={}", services.join(path).display());
     }
     println!("cargo:rerun-if-changed={}", dir.join("abi").display());

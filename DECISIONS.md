@@ -87,3 +87,9 @@ SPEC.md 没有规定、由实现选定的细节。格式按 §0：`日期 | 决�
 | 2026-10-31 | 出口意图的载荷哈希 = SHA-256（确定性 CBOR 编码的 blob 哈希列表）；闸门执行前重新计算；审批中的条目要逐项匹配通道、目标与载荷哈希；同一意图只执行一次 | blob 按内容寻址，哈希列表绑定了全部内容；"审的是 A，发出去的是 B"在闸门处被拒（BS8） | 可逆 |
 | 2026-10-31 | 开发确认器只在 `dev-confirmer` feature 下编译 | §12.7：只能在 debug 构建中启用 | 可逆 |
 | 2026-10-31 | 金额统一以分为单位，`max_cost_cny_per_day` 实现为 `max_cost_fen_per_day` | 整数运算，避免浮点误差 | 可逆 |
+| 2026-10-31 | DeviceMMIO 与 IRQ 由内核在启动时创建，不从 Untyped retype。能力映射的是包含 virtio-mmio 窗口的 4 KiB 页；驱动加上页内偏移。中断先屏蔽，绑定通知后才打开，驱动确认设备后再 IRQ_ACK | MMIO 不是 RAM，不能从 Untyped 切出；QEMU 的 virtio-mmio 窗口是 0x200 字节且经常不按页对齐 | 可逆 |
+| 2026-10-31 | 宿主 IPC 适配层走 virtio-console（hostlink 进程只持有该设备的 MMIO 和 IRQ），不走 virtio-net | §B10 允许 virtio-console 或端口转发；B-4 之前没有网卡。hostlink 没有网络、没有存储，见下条 | 可逆（B-4 之后可以改传输） |
+| 2026-10-31 | §B4 表格没有 hostlink。它只为 §B10 的一致性套件提供字节管道，不持有出站端点、存储端点或块设备 | 存储服务器按表格只持有 blk 驱动端点；控制台设备不能塞进存储服务器 | 可逆 |
+| 2026-10-31 | 磁盘布局：两个带 CRC32 和代数的超级块，16 MiB 只追加日志（段带 CRC32），其余是 CAS。先写段并 flush，再更新另一份超级块。恢复只相信代数更高且 CRC 正确的超级块，再校验哈希链。已提交数据的哈希链或 CRC 失败则进入只读安全模式；超级块未指向的尾部忽略 | §B6 的崩溃一致性。哈希链是篡改检测（BS4）；未提交的段是断电丢失（BS5） | 可逆（出现真实磁盘镜像之前） |
+| 2026-10-31 | CAS 索引是 CAS 区里的 extent 头，挂载时扫描重建，不写进对象日志 | 对象日志的字节就是 aos-log 的条目，混进别的记录会破坏哈希链。extent 头本身可重建，满足 §B6「索引可重建」 | 可逆 |
+| 2026-10-31 | 平台测试的 QEMU 使用 `-global virtio-mmio.force-legacy=off` 和 `cache=writethrough` | 本环境的 QEMU 8.2 默认 virtio-mmio 传统传输（版本 1）；关闭后才是 virtio 1.0。writethrough 让 virtio FLUSH 在 kill -9 之后仍然落在镜像里 | 可逆 |

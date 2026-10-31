@@ -11,7 +11,7 @@ use aos_rt::abi::{
     BOOT_INFO_MAGIC, BootInfo, CNODE_SLOTS, Error, ModuleInfo, ktest, ktest_b2, layout, method, object, rights,
     root_slots,
 };
-use aos_rt::cap::{configure, copy, delete, map, mint, move_cap, resume, retype, unmap, write_registers};
+use aos_rt::cap::{configure, copy, delete, irq_bind, map, mint, move_cap, resume, retype, unmap, write_registers};
 use aos_rt::println;
 
 aos_rt::entry!(main);
@@ -181,6 +181,10 @@ fn run(info: &BootInfo) -> Result<(), Error> {
     resume(memory.thread)?;
     move_cap(memory.cnode, memory.thread, CHILD_THREAD)?;
 
+    // virtio-blk, virtio-console and the storage server. Absent when the machine has no
+    // disk (the kernel tests); BS2 is unchanged in that case.
+    start_storage(info, &mut slots, pool, endpoint)?;
+
     // When the kernel tests boot us, they include a client for the memory server.
     if let Some(image) = module(info, "ktest-user") {
         let client = spawn(&mut slots, pool, image, 100, [ktest_b2::MEM_CLIENT, 0])?;
@@ -196,6 +200,69 @@ fn run(info: &BootInfo) -> Result<(), Error> {
             delete(root_slots::CNODE, slot)?;
         }
     }
+    Ok(())
+}
+
+/// Slots inside the blk driver and the console driver.
+const DRV_EP: u64 = 1;
+const DRV_SPACE: u64 = 4;
+const DRV_MMIO: u64 = 5;
+const DRV_IRQ: u64 = 6;
+const DRV_MEM: u64 = 7;
+const DRV_NTFN: u64 = 8;
+/// Slots inside the storage server.
+const ST_LINK: u64 = 1;
+const ST_SPACE: u64 = 4;
+const ST_BLK: u64 = 5;
+const ST_MEM: u64 = 6;
+
+fn hand_driver(child: &Child, mmio: u64, irq: u64, ep: u64, mem_ep: u64, ntfn: u64) -> Result<(), Error> {
+    copy(child.cnode, child.space, DRV_SPACE, rights::ALL)?;
+    move_cap(child.cnode, mmio, DRV_MMIO)?;
+    move_cap(child.cnode, irq, DRV_IRQ)?;
+    mint(child.cnode, mem_ep, DRV_MEM, rights::SEND, 0)?;
+    move_cap(child.cnode, ntfn, DRV_NTFN)?;
+    copy(child.cnode, ep, DRV_EP, rights::ALL)?;
+    Ok(())
+}
+
+fn start_storage(info: &BootInfo, slots: &mut Slots, pool: u64, mem_ep: u64) -> Result<(), Error> {
+    let devs = &info.devices[..info.device_count as usize];
+    let blk_dev = devs.iter().find(|d| d.kind == 2);
+    let con_dev = devs.iter().find(|d| d.kind == 3);
+    let (Some(blk_dev), Some(con_dev)) = (blk_dev, con_dev) else {
+        return Ok(());
+    };
+    let blk_ntfn = slots.take()?;
+    let con_ntfn = slots.take()?;
+    let blk_ep = slots.take()?;
+    let con_ep = slots.take()?;
+    retype(pool, object::NOTIFICATION, blk_ntfn, 1)?;
+    retype(pool, object::NOTIFICATION, con_ntfn, 1)?;
+    retype(pool, object::ENDPOINT, blk_ep, 1)?;
+    retype(pool, object::ENDPOINT, con_ep, 1)?;
+    irq_bind(blk_dev.irq_slot, blk_ntfn)?;
+    irq_bind(con_dev.irq_slot, con_ntfn)?;
+
+    let blk = spawn(slots, pool, module(info, "blk").ok_or(Error::InvalidArgument)?, 190, [blk_dev.base & 0xfff, 0])?;
+    hand_driver(&blk, blk_dev.mmio_slot, blk_dev.irq_slot, blk_ep, mem_ep, blk_ntfn)?;
+    resume(blk.thread)?;
+    move_cap(blk.cnode, blk.thread, CHILD_THREAD)?;
+
+    let link =
+        spawn(slots, pool, module(info, "hostlink").ok_or(Error::InvalidArgument)?, 180, [con_dev.base & 0xfff, 0])?;
+    hand_driver(&link, con_dev.mmio_slot, con_dev.irq_slot, con_ep, mem_ep, con_ntfn)?;
+    resume(link.thread)?;
+    move_cap(link.cnode, link.thread, CHILD_THREAD)?;
+
+    let storage = spawn(slots, pool, module(info, "storage").ok_or(Error::InvalidArgument)?, 160, [0, 0])?;
+    copy(storage.cnode, storage.space, ST_SPACE, rights::ALL)?;
+    mint(storage.cnode, con_ep, ST_LINK, rights::SEND, 1)?;
+    mint(storage.cnode, blk_ep, ST_BLK, rights::SEND | rights::GRANT, 2)?;
+    mint(storage.cnode, mem_ep, ST_MEM, rights::SEND, 3)?;
+    resume(storage.thread)?;
+    move_cap(storage.cnode, storage.thread, CHILD_THREAD)?;
+    println!("root: blk, hostlink and storage started");
     Ok(())
 }
 

@@ -1,0 +1,20 @@
+[package]
+name = "aos-storage-server"
+description = "Storage server: log segments and CAS on virtio-blk (SPEC §B6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "storage"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+aos-rt = { path = "../rt" }
+aos-storage = { path = "../../core/aos-storage" }
+aos-log = { path = "../../core/aos-log" }
+aos-types = { path = "../../core/aos-types" }
+linked_list_allocator = { version = "0.10.5", default-features = false, features = ["use_spin"] }

@@ -108,6 +108,13 @@ pub fn dispatch(k: &mut Kernel, cnode: KPtr<CNode>, priority: u8, index: u64, la
             OK
         }
         (Cap::AddressSpace(space), method::MAP) => map(cnode, space, a[0], a[1], a[2]),
+        (Cap::AddressSpace(space), method::MAP_DEVICE) => map_device(cnode, space, a[0], a[1]),
+        (Cap::Frame { pa, .. }, method::PHYS) => Ok([pa as u64, 4096, 0, 0]),
+        (Cap::Irq { index }, method::IRQ_BIND) => bind_irq(cnode, index, a[0]),
+        (Cap::Irq { index }, method::IRQ_ACK) => {
+            crate::irq::ack(index as usize);
+            OK
+        }
         (Cap::Frame { mapped, .. }, method::UNMAP) => {
             if let Some(m) = mapped {
                 k.spaces.unmap(m);
@@ -269,6 +276,39 @@ fn map(cnode: KPtr<CNode>, space: KPtr<crate::vspace::AddressSpace>, frame_index
     if let Cap::Frame { mapped, .. } = &mut unsafe { slot.get() }.cap {
         *mapped = Some(mapping);
     }
+    OK
+}
+
+/// Maps the caller's DeviceMMIO capability at `va` as device memory.
+fn map_device(cnode: KPtr<CNode>, space: KPtr<crate::vspace::AddressSpace>, dev_index: u64, va: u64) -> Reply {
+    let slot = slot_of(cnode, dev_index)?;
+    let Cap::Device { pa, mapped } = cap_of(slot) else { return Err(Error::InvalidCap) };
+    if mapped.is_some() {
+        return Err(Error::AlreadyMapped);
+    }
+    if !va.is_multiple_of(4096) {
+        return Err(Error::InvalidArgument);
+    }
+    // SAFETY: see above.
+    let s = unsafe { space.get() };
+    s.map(va, pa, Attrs::USER_DEVICE).map_err(|e| match e {
+        VSpaceError::OutOfMemory | VSpaceError::OutOfAsids => Error::NoMemory,
+        VSpaceError::Map(MapError::AlreadyMapped) => Error::AlreadyMapped,
+        _ => Error::InvalidArgument,
+    })?;
+    let mapping = s.mapping(va);
+    // SAFETY: see above.
+    if let Cap::Device { mapped, .. } = &mut unsafe { slot.get() }.cap {
+        *mapped = Some(mapping);
+    }
+    OK
+}
+
+fn bind_irq(cnode: KPtr<CNode>, index: u8, ntfn_index: u64) -> Reply {
+    let Cap::Notification { ntfn, .. } = cap_of(slot_of(cnode, ntfn_index)?) else {
+        return Err(Error::InvalidCap);
+    };
+    crate::irq::bind(index as usize, ntfn);
     OK
 }
 

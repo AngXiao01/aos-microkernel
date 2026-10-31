@@ -309,6 +309,20 @@ impl Kernel {
         self.exit(t, Exit::Fault { vector, esr, far, elr });
     }
 
+    fn deliver_irqs(&mut self) {
+        let bits = irq::take_pending();
+        if bits == 0 {
+            return;
+        }
+        for i in 0..irq::SLOTS {
+            if bits & (1 << i) != 0
+                && let Some(ntfn) = irq::notification(i)
+            {
+                crate::ipc::raise(self, ntfn, 1);
+            }
+        }
+    }
+
     fn handle_exit(&mut self, t: KPtr<Thread>, vector: u64) {
         let esr = cpu::esr_el1();
         let far = cpu::far_el1();
@@ -327,6 +341,7 @@ impl Kernel {
             if ticks > 0 {
                 self.tick(ticks);
             }
+            self.deliver_irqs();
             if done(self) {
                 return true;
             }

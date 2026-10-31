@@ -12,6 +12,7 @@ use aos_abi::{Error, IpcBuffer, MSG_REGS, MsgInfo, layout, sys};
 
 pub mod cap;
 pub mod debug;
+pub mod pipe;
 pub mod proto;
 
 core::arch::global_asm!(

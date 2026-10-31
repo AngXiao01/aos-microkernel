@@ -80,6 +80,15 @@ pub enum Cap {
     CNode(KPtr<CNode>),
     /// The capability audit (§B10); debug kernels only.
     Debug,
+    /// One 4 KiB MMIO page. Not carved from Untyped: the kernel creates it at boot.
+    Device {
+        pa: usize,
+        mapped: Option<Mapping>,
+    },
+    /// A hardware interrupt line. `index` names the kernel's binding slot.
+    Irq {
+        index: u8,
+    },
 }
 
 pub struct Slot {
@@ -130,7 +139,8 @@ fn retain(cap: &Cap) {
             Cap::Thread(t) => t.get().refs += 1,
             Cap::AddressSpace(a) => a.get().refs += 1,
             Cap::CNode(c) => c.get().refs += 1,
-            Cap::Null | Cap::Untyped { .. } | Cap::Frame { .. } | Cap::Debug => {}
+            Cap::Null | Cap::Untyped { .. } | Cap::Frame { .. } | Cap::Debug | Cap::Device { .. } | Cap::Irq { .. } => {
+            }
         }
     }
 }
@@ -173,6 +183,8 @@ pub fn derive(cap: Cap, mask: u64, badge: Option<u64>) -> Option<Cap> {
         Cap::Notification { ntfn, badge: b, rights } => {
             Some(Cap::Notification { ntfn, badge: rebadge(b), rights: rights.masked(mask) })
         }
+        Cap::Device { pa, .. } => Some(Cap::Device { pa, mapped: None }),
+        Cap::Irq { index } => Some(Cap::Irq { index }),
         other => Some(other),
     }
 }
@@ -277,7 +289,7 @@ fn release(k: &mut Kernel, cap: Cap) {
     // SAFETY: see above.
     unsafe {
         match cap {
-            Cap::Frame { mapped: Some(m), .. } => k.spaces.unmap(m),
+            Cap::Frame { mapped: Some(m), .. } | Cap::Device { mapped: Some(m), .. } => k.spaces.unmap(m),
             Cap::Endpoint { ep, .. } => {
                 let e = ep.get();
                 e.refs -= 1;
@@ -316,7 +328,12 @@ fn release(k: &mut Kernel, cap: Cap) {
                     }
                 }
             }
-            Cap::Null | Cap::Untyped { .. } | Cap::Frame { mapped: None, .. } | Cap::Debug => {}
+            Cap::Irq { index } => crate::irq::unbind(index as usize),
+            Cap::Null
+            | Cap::Untyped { .. }
+            | Cap::Frame { mapped: None, .. }
+            | Cap::Device { mapped: None, .. }
+            | Cap::Debug => {}
         }
     }
 }

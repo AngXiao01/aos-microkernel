@@ -12,7 +12,9 @@ members = [
     "core/aos-policy",
     "core/aos-confirm",
     "core/aos-egress",
+    "core/aos-storage",
     "tests/conformance",
+    "tests/platform",
 ]
 exclude = ["kernel", "services"]
 

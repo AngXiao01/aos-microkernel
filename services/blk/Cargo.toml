@@ -1,0 +1,17 @@
+[package]
+name = "aos-blk"
+description = "virtio-blk driver (MMIO + IRQ only; SPEC §B4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "blk"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+aos-rt = { path = "../rt" }
+aos-virtio = { path = "../virtio" }

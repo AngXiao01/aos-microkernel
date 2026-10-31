@@ -2,7 +2,9 @@
 //! thread, capability space and address space, and every byte of free memory as Untyped.
 //! Its job is to hand these out according to the capability table and then exit.
 
-use aos_abi::{BOOT_INFO_MAGIC, BootInfo, MAX_MODULES, MAX_UNTYPED, ModuleInfo, UntypedInfo, layout, root_slots};
+use aos_abi::{
+    BOOT_INFO_MAGIC, BootInfo, DeviceInfo, MAX_MODULES, MAX_UNTYPED, ModuleInfo, UntypedInfo, layout, root_slots,
+};
 
 use crate::cap::{self, Cap};
 use crate::kobj::KPtr;
@@ -77,11 +79,29 @@ pub fn start(k: &mut Kernel, modules: &[Module]) -> Result<KPtr<Thread>, SpawnEr
         }
     }
     info.first_free_slot = next;
+    for (i, dev) in crate::device::all().iter().enumerate() {
+        let mmio = root_slots::FIRST_DEVICE + (i as u64) * 2;
+        let irq = mmio + 1;
+        // virtio-mmio windows are 0x200 bytes and often not page-aligned. The capability
+        // names the page that contains the window; the driver adds `base & 0xfff`.
+        cap::insert(slot(cnode, mmio), Cap::Device { pa: dev.base & !0xfff, mapped: None }, None);
+        cap::insert(slot(cnode, irq), Cap::Irq { index: i as u8 }, None);
+        crate::irq::register(i, dev.irq);
+        info.devices[i] = DeviceInfo {
+            kind: u64::from(dev.kind),
+            base: dev.base as u64,
+            irq: u64::from(dev.irq),
+            mmio_slot: mmio,
+            irq_slot: irq,
+        };
+        info.device_count = i as u64 + 1;
+    }
     kprintln!(
-        "root: {} modules, {} untyped ({} MiB)",
+        "root: {} modules, {} untyped ({} MiB), {} devices",
         info.module_count,
         info.untyped_count,
-        info.untyped[..info.untyped_count as usize].iter().map(|u| 1u64 << u.size_bits).sum::<u64>() >> 20
+        info.untyped[..info.untyped_count as usize].iter().map(|u| 1u64 << u.size_bits).sum::<u64>() >> 20,
+        info.device_count
     );
     k.make_ready(p.thread);
     Ok(p.thread)

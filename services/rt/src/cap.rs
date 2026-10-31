@@ -63,3 +63,19 @@ pub fn unmap(frame: u64) -> Result<(), Error> {
 pub fn dump_caps(debug: u64) -> Result<(), Error> {
     invoke(debug, method::DUMP_CAPS, [0; 4]).map(|_| ())
 }
+
+pub fn map_device(space: u64, device: u64, va: u64) -> Result<(), Error> {
+    invoke(space, method::MAP_DEVICE, [device, va, 0, 0]).map(|_| ())
+}
+
+pub fn phys(frame: u64) -> Result<u64, Error> {
+    invoke(frame, method::PHYS, [0; 4]).map(|w| w[0])
+}
+
+pub fn irq_bind(irq: u64, notification: u64) -> Result<(), Error> {
+    invoke(irq, method::IRQ_BIND, [notification, 0, 0, 0]).map(|_| ())
+}
+
+pub fn irq_ack(irq: u64) -> Result<(), Error> {
+    invoke(irq, method::IRQ_ACK, [0; 4]).map(|_| ())
+}

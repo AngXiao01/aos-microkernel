@@ -1,0 +1,18 @@
+[package]
+name = "aos-platform"
+description = "Host IPC adapter: conformance suite, BS4 and BS5 against virtio-blk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "aos-platform"
+path = "src/main.rs"
+
+[dependencies]
+aos-types = { path = "../../core/aos-types" }
+aos-log = { path = "../../core/aos-log" }
+aos-branch = { path = "../../core/aos-branch" }
+aos-storage = { path = "../../core/aos-storage" }
+aos-conformance = { path = "../conformance" }

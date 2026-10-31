@@ -1,0 +1,11 @@
+[package]
+name = "aos-storage"
+description = "virtio-blk volume: superblock, append-only log, content-addressed extents (SPEC §B6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-log = { path = "../aos-log" }
+aos-types = { path = "../aos-types" }

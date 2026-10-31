@@ -157,6 +157,16 @@ impl<'a> Fdt<'a> {
     }
 }
 
+/// A virtio-mmio transport from the device tree (the device id is read from the registers).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MmioNode {
+    pub base: usize,
+    pub size: usize,
+    pub irq: u32,
+}
+
+pub const MAX_VIRTIO: usize = 32;
+
 /// What the kernel needs from the device tree.
 pub struct Platform<'a> {
     pub memory: RegionList<8>,
@@ -165,6 +175,8 @@ pub struct Platform<'a> {
     /// GICv2 distributor and CPU interface (physical).
     pub gic: Option<(Region, Region)>,
     pub bootargs: Option<&'a str>,
+    pub virtio: [MmioNode; MAX_VIRTIO],
+    pub virtio_count: usize,
 }
 
 #[derive(Default)]
@@ -174,12 +186,35 @@ struct NodeScan<'a> {
     device_type_memory: bool,
     pl011: bool,
     gic_v2: bool,
+    virtio: bool,
     reg: Option<&'a [u8]>,
+    interrupts: Option<&'a [u8]>,
+}
+
+/// First interrupt in a GIC `interrupts` property: SPI n is intid 32+n, PPI n is intid 16+n.
+fn gic_intid(raw: &[u8]) -> Option<u32> {
+    if raw.len() < 12 {
+        return None;
+    }
+    let typ = u32::from_be_bytes(raw[0..4].try_into().ok()?);
+    let id = u32::from_be_bytes(raw[4..8].try_into().ok()?);
+    match typ {
+        0 => Some(32 + id),
+        1 => Some(16 + id),
+        _ => None,
+    }
 }
 
 impl<'a> Platform<'a> {
     pub fn discover(fdt: &Fdt<'a>) -> Result<Platform<'a>, FdtError> {
-        let mut out = Platform { memory: RegionList::new(), uart: None, gic: None, bootargs: None };
+        let mut out = Platform {
+            memory: RegionList::new(),
+            uart: None,
+            gic: None,
+            bootargs: None,
+            virtio: [MmioNode { base: 0, size: 0, irq: 0 }; MAX_VIRTIO],
+            virtio_count: 0,
+        };
         // cells[d] = (#address-cells, #size-cells) declared by the open node at depth d for
         // its children; DTSpec defaults are 2 and 1.
         let mut cells = [(2u32, 1u32); MAX_DEPTH];
@@ -209,8 +244,10 @@ impl<'a> Platform<'a> {
                             let is = |name: &[u8]| value.split(|&b| b == 0).any(|c| c == name);
                             node.pl011 = is(b"arm,pl011");
                             node.gic_v2 = is(b"arm,cortex-a15-gic") || is(b"arm,gic-400");
+                            node.virtio = is(b"virtio,mmio");
                         }
                         b"reg" => node.reg = Some(value),
+                        b"interrupts" => node.interrupts = Some(value),
                         b"bootargs" if node.depth == 1 && node.name == b"chosen" => {
                             let text = cstr(value)?;
                             out.bootargs = Some(core::str::from_utf8(text).map_err(|_| FdtError::Malformed)?);
@@ -252,9 +289,13 @@ impl<'a> Platform<'a> {
             }
         };
         let mut gic: [Region; 2] = [Region::EMPTY; 2];
+        let mut first_reg: Option<(u64, u64)> = None;
         for (i, off) in (0..reg.len()).step_by(entry).enumerate() {
             let addr = read(off, addr_cells)?;
             let size = read(off + 4 * addr_cells as usize, size_cells)?;
+            if first_reg.is_none() {
+                first_reg = Some((addr, size));
+            }
             if node.gic_v2 && i < 2 {
                 gic[i] = Region::new(addr as usize, (addr + size) as usize);
             }
@@ -264,6 +305,14 @@ impl<'a> Platform<'a> {
             } else if node.pl011 && self.uart.is_none() {
                 self.uart = Some(addr as usize);
             }
+        }
+        if node.virtio
+            && self.virtio_count < MAX_VIRTIO
+            && let (Some((addr, size)), Some(intid)) = (first_reg, node.interrupts.and_then(gic_intid))
+        {
+            let n = self.virtio_count;
+            self.virtio[n] = MmioNode { base: addr as usize, size: size as usize, irq: intid };
+            self.virtio_count += 1;
         }
         if node.gic_v2 && self.gic.is_none() {
             if gic[1].is_empty() {

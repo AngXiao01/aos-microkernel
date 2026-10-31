@@ -9,7 +9,14 @@ test-core:
 
 # The core libraries must build for the bare-metal userspace target.
 check-nostd:
-	cargo build -p aos-types -p aos-log -p aos-branch -p aos-cap -p aos-action -p aos-runtime -p aos-policy -p aos-confirm -p aos-egress --target aarch64-unknown-none
+	cargo build -p aos-types -p aos-log -p aos-branch -p aos-cap -p aos-action -p aos-runtime -p aos-policy -p aos-confirm -p aos-egress -p aos-storage --target aarch64-unknown-none
+
+# B-3: conformance log/transaction/branch/undo over virtio-blk, plus BS4 and BS5.
+# Requires the debug kernel (user println) and QEMU.
+test-b3:
+	cd kernel && cargo build --release --features debug-syscalls
+	cargo build -p aos-platform --release
+	./target/release/aos-platform
 
 # In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry), including the
 # B-1 tests that run services/ktest-user.

@@ -68,6 +68,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-platform"
+version = "0.1.0"
+dependencies = [
+ "aos-branch",
+ "aos-conformance",
+ "aos-log",
+ "aos-storage",
+ "aos-types",
+]
+
+[[package]]
 name = "aos-policy"
 version = "0.1.0"
 dependencies = [
@@ -86,6 +97,14 @@ dependencies = [
  "aos-types",
  "wasmi",
  "wat",
+]
+
+[[package]]
+name = "aos-storage"
+version = "0.1.0"
+dependencies = [
+ "aos-log",
+ "aos-types",
 ]
 
 [[package]]

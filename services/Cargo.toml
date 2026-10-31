@@ -2,7 +2,7 @@
 # restores FP state per thread). The kernel's ktest build compiles ktest-user from here.
 [workspace]
 resolver = "3"
-members = ["rt", "ktest-user", "root", "memory"]
+members = ["rt", "ktest-user", "root", "memory", "virtio", "blk", "hostlink", "storage"]
 
 [workspace.package]
 version = "0.1.0"

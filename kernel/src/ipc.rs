@@ -281,6 +281,22 @@ pub fn reply(k: &mut Kernel, t: KPtr<Thread>) -> Error {
     Error::Ok
 }
 
+/// Sets bits on a notification and wakes one waiter. Used by the run loop for device IRQs.
+pub fn raise(k: &mut Kernel, ntfn: KPtr<Notification>, bits: u64) {
+    // SAFETY: see above; called from the run loop, not from an interrupt handler.
+    let n = unsafe { ntfn.get() };
+    n.bits |= bits;
+    if let Some(w) = n.waiters.pop_front(queue_link) {
+        // SAFETY: see above; the waiter is blocked.
+        let wt = unsafe { w.get() };
+        wt.ctx.x[2] = core::mem::take(&mut n.bits);
+        wt.blocked_on = Blocked::Nothing;
+        wt.set_status(Error::Ok);
+        k.cancel_timeout(w);
+        k.make_ready(w);
+    }
+}
+
 /// SIGNAL.
 pub fn signal(k: &mut Kernel, t: KPtr<Thread>) {
     let (slot, _, _) = regs(t);

@@ -207,6 +207,14 @@ pub mod method {
     pub const UNMAP: u64 = 12;
     /// Debug: print a summary of every capability space (§B10 capability audit).
     pub const DUMP_CAPS: u64 = 13;
+    /// AddressSpace: `(device_slot, va)` → map that DeviceMMIO page as device memory.
+    pub const MAP_DEVICE: u64 = 14;
+    /// Frame: `()` → `(physical address, 4096)`.
+    pub const PHYS: u64 = 15;
+    /// IRQ: `(notification_slot)` → deliver that interrupt by signalling the notification.
+    pub const IRQ_BIND: u64 = 16;
+    /// IRQ: re-enable the line after the driver has acknowledged the device.
+    pub const IRQ_ACK: u64 = 17;
 
     pub const WRITE: u64 = 1;
     pub const EXECUTE: u64 = 2;
@@ -230,6 +238,22 @@ pub mod root_slots {
     pub const DEBUG: u64 = 4;
     /// Untyped capabilities start here; `BootInfo` says how many.
     pub const FIRST_UNTYPED: u64 = 16;
+    /// DeviceMMIO / IRQ pairs the kernel created for virtio transports: slot
+    /// `FIRST_DEVICE + 2*i` is the MMIO page, the next slot is the IRQ.
+    pub const FIRST_DEVICE: u64 = 8;
+}
+
+pub const MAX_DEVICES: usize = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DeviceInfo {
+    /// virtio device id: 2 = block, 3 = console.
+    pub kind: u64,
+    pub base: u64,
+    pub irq: u64,
+    pub mmio_slot: u64,
+    pub irq_slot: u64,
 }
 
 pub const MAX_UNTYPED: usize = 64;
@@ -261,6 +285,8 @@ pub struct BootInfo {
     pub modules: [ModuleInfo; MAX_MODULES],
     /// The first slot of the root CNode the kernel left empty.
     pub first_free_slot: u64,
+    pub device_count: u64,
+    pub devices: [DeviceInfo; MAX_DEVICES],
 }
 
 pub const BOOT_INFO_MAGIC: u64 = 0x414f_535f_424f_4f54; // "AOS_BOOT"
