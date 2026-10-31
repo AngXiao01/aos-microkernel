@@ -10,6 +10,10 @@ publish.workspace = true
 aos-types = { path = "../../core/aos-types" }
 aos-log = { path = "../../core/aos-log" }
 aos-branch = { path = "../../core/aos-branch" }
+aos-cap = { path = "../../core/aos-cap" }
+aos-action = { path = "../../core/aos-action" }
+aos-runtime = { path = "../../core/aos-runtime" }
+wat = "1"
 
 [dev-dependencies]
 proptest.workspace = true

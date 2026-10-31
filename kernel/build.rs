@@ -20,6 +20,9 @@ fn main() {
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .env_remove("CARGO_BUILD_TARGET")
             .env_remove("CARGO_TARGET_DIR")
+            // Do not run the outer clippy (or other wrapper) over the nested workspace.
+            .env_remove("RUSTC_WORKSPACE_WRAPPER")
+            .env_remove("RUSTC_WRAPPER")
             .status()
             .expect("run cargo for services/");
         assert!(status.success(), "building services/ktest-user failed");

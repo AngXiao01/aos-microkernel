@@ -1,0 +1,11 @@
+[package]
+name = "aos-action"
+description = "Action declarations, input binding, preconditions and cost (SPEC §8, M2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }
+aos-branch = { path = "../aos-branch" }

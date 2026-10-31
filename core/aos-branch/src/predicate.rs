@@ -76,7 +76,9 @@ fn order(a: &Value, b: &Value) -> Option<Ordering> {
     }
 }
 
-fn compare(actual: &Value, cmp: Cmp, expected: &Value) -> bool {
+/// The comparison rules predicates use: numbers compare across int and float, text and
+/// booleans by order, everything else only by equality.
+pub fn compare(actual: &Value, cmp: Cmp, expected: &Value) -> bool {
     match cmp {
         Cmp::Eq => actual == expected || order(actual, expected) == Some(Ordering::Equal),
         Cmp::Ne => !(actual == expected || order(actual, expected) == Some(Ordering::Equal)),

@@ -238,6 +238,13 @@ fn kind_name(kind: &FieldKind) -> &'static str {
     }
 }
 
+impl FieldKind {
+    /// Checks one value against this kind; `field` names it in the error.
+    pub fn check(&self, field: &str, value: &Value) -> Result<(), ValidationError> {
+        check_value(field, self, value)
+    }
+}
+
 fn check_value(field: &str, kind: &FieldKind, value: &Value) -> Result<(), ValidationError> {
     let mismatch = || ValidationError::KindMismatch {
         field: String::from(field),

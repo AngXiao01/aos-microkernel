@@ -645,6 +645,43 @@ impl<S: LogStorage, E: Env> Store<S, E> {
         self.observe(tx, id, |o| o.cloned()).1
     }
 
+    /// Live objects of type `type_id` in the transaction's view (snapshot plus its own
+    /// writes). The matches are recorded as read; objects created concurrently are not
+    /// detected (no phantom protection in v1). O(objects): there is no type index yet.
+    pub fn scan(&self, tx: &mut Tx, type_id: &aos_types::TypeId) -> Vec<Ulid> {
+        let view = self.snapshot(tx);
+        let fork_ids = match tx.branch {
+            BranchId::Fork(id) => self.state.forks.get(&id).map(|f| f.overlay.objects.keys()),
+            BranchId::Main => None,
+        };
+        let candidates: alloc::collections::BTreeSet<Ulid> = self
+            .state
+            .main
+            .objects
+            .keys()
+            .chain(fork_ids.into_iter().flatten())
+            .chain(tx.pending.keys())
+            .copied()
+            .collect();
+        let matching: Vec<Ulid> = candidates
+            .into_iter()
+            .filter(|id| {
+                let object = match tx.pending.get(id) {
+                    Some(&(_, i)) => match &tx.writes[i].change {
+                        Change::Put(o) => Some(o),
+                        Change::Delete => None,
+                    },
+                    None => view.object(*id),
+                };
+                object.is_some_and(|o| &o.type_id == type_id)
+            })
+            .collect();
+        for id in &matching {
+            self.observe(tx, *id, |_| ());
+        }
+        matching
+    }
+
     /// Writes `object` as the next version of `object.id` (creating it if needed). The
     /// store sets `version`, `provenance.actor` and `provenance.tx`, and raises the taint:
     /// external origin or any tainted input makes the object tainted (SPEC §10).

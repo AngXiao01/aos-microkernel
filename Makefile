@@ -9,7 +9,7 @@ test-core:
 
 # The core libraries must build for the bare-metal userspace target.
 check-nostd:
-	cargo build -p aos-types -p aos-log -p aos-branch --target aarch64-unknown-none
+	cargo build -p aos-types -p aos-log -p aos-branch -p aos-cap -p aos-action -p aos-runtime --target aarch64-unknown-none
 
 # In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry), including the
 # B-1 tests that run services/ktest-user.
@@ -24,6 +24,8 @@ lint:
 	cd kernel && cargo clippy --release --features ktest -- -D warnings
 	cd services && cargo fmt --check
 	cd services && cargo clippy --release -- -D warnings
+	cd actions && cargo fmt --check
+	cd actions && cargo clippy --release -- -D warnings
 
 run:
 	kernel/scripts/qemu.sh
