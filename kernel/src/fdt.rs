@@ -162,6 +162,8 @@ pub struct Platform<'a> {
     pub memory: RegionList<8>,
     /// PL011 MMIO base (physical).
     pub uart: Option<usize>,
+    /// GICv2 distributor and CPU interface (physical).
+    pub gic: Option<(Region, Region)>,
     pub bootargs: Option<&'a str>,
 }
 
@@ -171,12 +173,13 @@ struct NodeScan<'a> {
     name: &'a [u8],
     device_type_memory: bool,
     pl011: bool,
+    gic_v2: bool,
     reg: Option<&'a [u8]>,
 }
 
 impl<'a> Platform<'a> {
     pub fn discover(fdt: &Fdt<'a>) -> Result<Platform<'a>, FdtError> {
-        let mut out = Platform { memory: RegionList::new(), uart: None, bootargs: None };
+        let mut out = Platform { memory: RegionList::new(), uart: None, gic: None, bootargs: None };
         // cells[d] = (#address-cells, #size-cells) declared by the open node at depth d for
         // its children; DTSpec defaults are 2 and 1.
         let mut cells = [(2u32, 1u32); MAX_DEPTH];
@@ -202,7 +205,11 @@ impl<'a> Platform<'a> {
                         b"#address-cells" => cells[node.depth].0 = be32(value, 0)?,
                         b"#size-cells" => cells[node.depth].1 = be32(value, 0)?,
                         b"device_type" => node.device_type_memory = value == b"memory\0",
-                        b"compatible" => node.pl011 = value.split(|&b| b == 0).any(|c| c == b"arm,pl011"),
+                        b"compatible" => {
+                            let is = |name: &[u8]| value.split(|&b| b == 0).any(|c| c == name);
+                            node.pl011 = is(b"arm,pl011");
+                            node.gic_v2 = is(b"arm,cortex-a15-gic") || is(b"arm,gic-400");
+                        }
                         b"reg" => node.reg = Some(value),
                         b"bootargs" if node.depth == 1 && node.name == b"chosen" => {
                             let text = cstr(value)?;
@@ -244,15 +251,25 @@ impl<'a> Platform<'a> {
                 Ok(0)
             }
         };
-        for off in (0..reg.len()).step_by(entry) {
+        let mut gic: [Region; 2] = [Region::EMPTY; 2];
+        for (i, off) in (0..reg.len()).step_by(entry).enumerate() {
             let addr = read(off, addr_cells)?;
             let size = read(off + 4 * addr_cells as usize, size_cells)?;
+            if node.gic_v2 && i < 2 {
+                gic[i] = Region::new(addr as usize, (addr + size) as usize);
+            }
             if node.device_type_memory {
                 let end = addr.checked_add(size).ok_or(FdtError::Malformed)?;
                 self.memory.push(Region::new(addr as usize, end as usize)).map_err(|_| FdtError::TooManyRegions)?;
             } else if node.pl011 && self.uart.is_none() {
                 self.uart = Some(addr as usize);
             }
+        }
+        if node.gic_v2 && self.gic.is_none() {
+            if gic[1].is_empty() {
+                return Err(FdtError::Malformed);
+            }
+            self.gic = Some((gic[0], gic[1]));
         }
         Ok(())
     }
@@ -319,6 +336,7 @@ mod tests {
         fn finds_the_qemu_virt_devices() {
             let p = &crate::boot_info().platform;
             kassert_eq!(p.uart, Some(0x0900_0000));
+            kassert_eq!(p.gic, Some((Region::new(0x0800_0000, 0x0801_0000), Region::new(0x0801_0000, 0x0802_0000))));
             kassert_eq!(p.memory.as_slice().len(), 1);
             kassert_eq!(p.memory.as_slice()[0].start, 0x4000_0000);
             let mib: usize = kunwrap!(p.bootarg("aos.test.mem_mib").ok_or("no aos.test.mem_mib bootarg").and_then(|v| v.parse().map_err(|_| "bad number")));

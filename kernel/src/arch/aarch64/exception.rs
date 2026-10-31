@@ -1,9 +1,9 @@
 //! Exception vectors and dispatch.
 //!
-//! Every vector saves the full register state in a [`TrapFrame`] on the current stack and
-//! calls [`trap_dispatch`], which may modify the frame before it is restored. In B-0 the
-//! only recoverable exceptions are faults raised by [`super::probe`]; everything else is
-//! a kernel bug and panics.
+//! Exceptions from EL0 go to the user exit path (`user.rs`). Exceptions taken at EL1 save
+//! the full register state in a [`TrapFrame`] on the kernel stack and call
+//! [`trap_dispatch`]. At EL1 the only expected ones are faults raised by [`super::probe`]
+//! and interrupts taken while idle; anything else is a kernel bug and panics.
 
 use super::{cpu, probe};
 
@@ -27,6 +27,15 @@ core::arch::global_asm!(
     b       trap_entry
 .endm
 
+// From EL0: save into the current user context and return from aos_enter_user (user.rs).
+.macro USER_VECTOR kind
+.balign 0x80
+    stp     x0, x1, [sp, #-16]!
+    mrs     x0, tpidr_el1
+    mov     x1, #\kind
+    b       aos_user_exit
+.endm
+
 .pushsection .text.vectors, "ax"
 .balign 2048
 .global exception_vectors
@@ -39,14 +48,14 @@ exception_vectors:
     VECTOR 5
     VECTOR 6
     VECTOR 7
-    VECTOR 8
-    VECTOR 9
-    VECTOR 10
-    VECTOR 11
-    VECTOR 12
-    VECTOR 13
-    VECTOR 14
-    VECTOR 15
+    USER_VECTOR 8
+    USER_VECTOR 9
+    USER_VECTOR 10
+    USER_VECTOR 11
+    USER_VECTOR 12
+    USER_VECTOR 13
+    USER_VECTOR 14
+    USER_VECTOR 15
 
 trap_entry:                             // x1 = vector index
     stp     x2, x3, [sp, #16 * 1]
@@ -116,6 +125,9 @@ const VECTOR_NAMES: [&str; 16] = [
     "EL0/AArch32 SError",
 ];
 const EL1H_SYNC: u64 = 4;
+const EL1H_IRQ: u64 = 5;
+pub const EL0_SYNC: u64 = 8;
+pub const EL0_IRQ: u64 = 9;
 
 /// Exception classes (ESR_ELx.EC).
 pub mod ec {
@@ -154,6 +166,10 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame, vector: u64) {
     let esr = cpu::esr_el1();
     let far = cpu::far_el1();
     if vector == EL1H_SYNC && probe::fixup(frame, esr, far) {
+        return;
+    }
+    if vector == EL1H_IRQ {
+        crate::irq::handle();
         return;
     }
     panic!(

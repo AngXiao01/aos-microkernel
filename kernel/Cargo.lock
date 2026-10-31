@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "aos-abi"
+version = "0.1.0"
+
+[[package]]
 name = "aos-kernel"
 version = "0.1.0"
+dependencies = [
+ "aos-abi",
+]

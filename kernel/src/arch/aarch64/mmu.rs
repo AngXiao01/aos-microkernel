@@ -8,9 +8,12 @@ pub const DESC_VALID: u64 = 1 << 0;
 pub const DESC_TABLE: u64 = 1 << 1;
 pub const DESC_PAGE: u64 = 1 << 1;
 pub const DESC_BLOCK: u64 = 0;
+pub const AP_EL0: u64 = 1 << 6;
 pub const AP_RO: u64 = 1 << 7;
 pub const SH_INNER: u64 = 3 << 8;
 pub const AF: u64 = 1 << 10;
+/// Not global: the TLB entry is tagged with the ASID (user mappings).
+pub const NG: u64 = 1 << 11;
 pub const PXN: u64 = 1 << 53;
 pub const UXN: u64 = 1 << 54;
 pub const ADDR_MASK: u64 = 0x0000_ffff_ffff_f000;
@@ -41,6 +44,14 @@ pub const SCTLR_WXN: u64 = 1 << 19;
 pub fn sync_tables() {
     // SAFETY: barriers only.
     unsafe { asm!("dsb ishst", "isb", options(nostack, preserves_flags)) };
+}
+
+/// Makes `ttbr0 | asid << 48` the user address space. Entries are ASID-tagged, so no TLB
+/// maintenance is needed.
+pub fn set_user_space(ttbr0: usize, asid: u16) {
+    let value = ttbr0 as u64 | (u64::from(asid) << 48);
+    // SAFETY: the kernel runs from TTBR1 only; TTBR0 changes what EL0 sees.
+    unsafe { asm!("msr ttbr0_el1, {}", "isb", in(reg) value, options(nostack, preserves_flags)) };
 }
 
 /// Invalidates the TLB entries for `va` in all ASIDs.

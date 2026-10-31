@@ -1,6 +1,33 @@
+use std::path::PathBuf;
+use std::process::Command;
+
 fn main() {
-    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    println!("cargo:rustc-link-arg=-T{dir}/link.ld");
+    let dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    println!("cargo:rustc-link-arg=-T{}", dir.join("link.ld").display());
     println!("cargo:rustc-link-arg=-zmax-page-size=4096");
     println!("cargo:rerun-if-changed=link.ld");
+
+    // The kernel tests run user programs; build them from services/ for the user target.
+    if std::env::var_os("CARGO_FEATURE_KTEST").is_some() {
+        let services = dir.join("../services");
+        let target_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("services");
+        let status = Command::new(std::env::var("CARGO").unwrap())
+            .current_dir(&services)
+            .args(["build", "--release", "-p", "aos-ktest-user", "--target-dir"])
+            .arg(&target_dir)
+            // The kernel's flags (linker script, target) must not leak into user programs.
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .env_remove("CARGO_TARGET_DIR")
+            .status()
+            .expect("run cargo for services/");
+        assert!(status.success(), "building services/ktest-user failed");
+        let bins = target_dir.join("aarch64-unknown-none/release");
+        println!("cargo:rustc-env=AOS_KTEST_USER_DIR={}", bins.display());
+        for path in ["Cargo.toml", "rt", "ktest-user"] {
+            println!("cargo:rerun-if-changed={}", services.join(path).display());
+        }
+        println!("cargo:rerun-if-changed={}", dir.join("abi").display());
+    }
 }

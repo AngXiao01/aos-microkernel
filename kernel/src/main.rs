@@ -1,12 +1,13 @@
 //! AOS microkernel (SPEC part 2).
 //!
 //! B-0: boot on QEMU `virt` (aarch64), serial console, exception vectors, kernel page tables.
+//! B-1: user threads and address spaces, preemptive scheduling, synchronous IPC.
 
 #![no_std]
 #![no_main]
 #![deny(unsafe_op_in_unsafe_fn)]
-// Until B-1, parts of the B-0 infrastructure (probes, unmap, the frame allocator API) are
-// used only by the kernel tests; the ktest build still reports dead code.
+// Until the root task exists (B-2), much of the kernel is only exercised by the kernel
+// tests; the ktest build still reports dead code.
 #![cfg_attr(not(feature = "ktest"), allow(dead_code))]
 
 #[macro_use]
@@ -16,10 +17,22 @@ mod console;
 mod ktest;
 
 mod arch;
+mod cap;
+mod elf;
 mod fdt;
+mod ipc;
+mod irq;
+mod kobj;
 mod mm;
 mod pl011;
+mod process;
+mod sched;
 mod sync;
+mod syscall;
+mod thread;
+#[cfg(feature = "ktest")]
+mod user_tests;
+mod vspace;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -76,12 +89,18 @@ extern "C" fn kernel_main(dtb_pa: usize) -> ! {
     for r in core::iter::once(&dtb).chain(rsvmap.as_slice()) {
         reserved.push(*r).unwrap_or_else(|_| unreachable!("capacity covers the DTB and 8 reservations"));
     }
-    let stats = mm::init(&platform, reserved.as_slice(), uart_pa).unwrap_or_else(|e| panic!("mm: {e}"));
+    let (gicd, gicc) = platform.gic.unwrap_or_else(|| panic!("device tree has no GICv2"));
+    let devices = [Region::new(uart_pa, uart_pa + 0x1000), gicd, gicc];
+    let stats = mm::init(&platform, reserved.as_slice(), &devices).unwrap_or_else(|e| panic!("mm: {e}"));
     kprintln!(
         "mm: kernel address space active ({} KiB of page tables, {} MiB free)",
         stats.table_frames * 4,
         stats.free_bytes >> 20
     );
+
+    // SAFETY: both regions were just mapped as device memory.
+    unsafe { irq::init(mm::phys_to_virt(gicd.start), mm::phys_to_virt(gicc.start)) };
+    kprintln!("irq: GICv2, {} Hz tick, counter at {} MHz", irq::TICK_HZ, arch::timer::frequency() / 1_000_000);
 
     if BOOT_INFO.set(BootInfo { platform, dtb, entry_el }).is_err() {
         unreachable!("kernel_main runs once");
@@ -92,7 +111,8 @@ extern "C" fn kernel_main(dtb_pa: usize) -> ! {
 
     #[cfg(not(feature = "ktest"))]
     {
-        kprintln!("boot complete (B-0)");
+        kprintln!("boot complete; no root task yet (B-2), idling");
+        sched::KERNEL.lock().run_until(|_| false, u64::MAX);
         arch::cpu::halt()
     }
 }

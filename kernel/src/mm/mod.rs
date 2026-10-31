@@ -70,8 +70,9 @@ pub struct MmStats {
 }
 
 /// Builds the kernel address space and switches to it. `reserved` lists physical ranges
-/// besides the kernel image that must not be allocated (the DTB, its reservation block).
-pub fn init(platform: &Platform<'_>, reserved: &[Region], uart_pa: usize) -> Result<MmStats, InitError> {
+/// besides the kernel image that must not be allocated (the DTB, its reservation block);
+/// `devices` lists the MMIO ranges the kernel itself uses (console, interrupt controller).
+pub fn init(platform: &Platform<'_>, reserved: &[Region], devices: &[Region]) -> Result<MmStats, InitError> {
     let layout = layout::kernel_layout();
     let mut all_reserved: RegionList<16> = RegionList::new();
     all_reserved.push(Region::new(virt_to_phys(layout.image.start), virt_to_phys(layout.image.end)))?;
@@ -81,9 +82,9 @@ pub fn init(platform: &Platform<'_>, reserved: &[Region], uart_pa: usize) -> Res
     let mut frames = FrameAllocator::new(platform.memory.as_slice(), all_reserved.as_slice())?;
     frames.set_limit(BOOT_MAP_END);
 
-    let root = build_kernel_space(&layout, platform.memory.as_slice(), uart_pa, &mut frames)?;
+    let root = build_kernel_space(&layout, platform.memory.as_slice(), devices, &mut frames)?;
     let empty_ttbr0 = frames.alloc().ok_or(MapError::OutOfMemory)?;
-    // SAFETY: the new tables map the kernel image, the boot stack, all RAM and the console
+    // SAFETY: the new tables map the kernel image, the boot stack, all RAM and the devices
     // at the same virtual addresses as the boot map, and no code runs from a writable page.
     unsafe {
         mmu::switch_tables(root, empty_ttbr0);
@@ -110,7 +111,7 @@ pub fn with_frames<R>(f: impl FnOnce(&mut FrameAllocator) -> R) -> R {
 fn build_kernel_space(
     layout: &KernelLayout,
     ram: &[Region],
-    uart_pa: usize,
+    devices: &[Region],
     frames: &mut FrameAllocator,
 ) -> Result<usize, MapError> {
     let root = frames.alloc().ok_or(MapError::OutOfMemory)?;
@@ -131,8 +132,12 @@ fn build_kernel_space(
             }
         }
     }
-    let uart_page = region::align_down(uart_pa, PAGE_SIZE);
-    paging::map(root, phys_to_virt(uart_page), uart_page, PageSize::Page4K, Attrs::DEVICE_RW, frames)?;
+    for d in devices {
+        let d = d.align_outward(PAGE_SIZE);
+        for pa in (d.start..d.end).step_by(PAGE_SIZE) {
+            paging::map(root, phys_to_virt(pa), pa, PageSize::Page4K, Attrs::DEVICE_RW, frames)?;
+        }
+    }
     Ok(root)
 }
 

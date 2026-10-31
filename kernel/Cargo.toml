@@ -7,12 +7,20 @@ rust-version = "1.97"
 publish = false
 
 # Separate workspace: the kernel always builds for aarch64-unknown-none-softfloat
-# (.cargo/config.toml) and has no dependencies.
+# (.cargo/config.toml). Its only dependency is the in-tree ABI crate shared with user space.
 [workspace]
+members = ["abi"]
+
+[dependencies]
+aos-abi = { path = "abi" }
 
 [features]
-# In-kernel unit tests, run by scripts/ktest.sh. Also enables the semihosting exit call.
-ktest = []
+# In-kernel unit tests, run by scripts/ktest.sh. Also enables the semihosting exit call and
+# builds the user-space test programs (services/ktest-user) into the kernel image.
+ktest = ["debug-syscalls"]
+# User threads may print to the kernel console. The serial port leads out of AOS, so this
+# is a channel around the egress gateway: never enabled in a production build.
+debug-syscalls = []
 
 [[bin]]
 name = "aos-kernel"

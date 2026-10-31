@@ -1,0 +1,16 @@
+[package]
+name = "aos-ktest-user"
+description = "User programs driven by the kernel's B-1 tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ktest-user"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+aos-rt = { path = "../rt" }

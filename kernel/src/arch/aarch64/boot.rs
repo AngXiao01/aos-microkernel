@@ -59,6 +59,11 @@ _start:
 
 .Lat_el1:
     msr     daifset, #0xf
+    mov     x1, #(3 << 20)              // CPACR_EL1.FPEN: no FP/SIMD traps (the kernel itself
+    msr     cpacr_el1, x1               // never uses FP; it only saves and restores user state)
+    mov     x1, #(1 << 1)               // CNTKCTL_EL1.EL0VCTEN: EL0 may read the virtual counter
+    msr     cntkctl_el1, x1
+    isb
     adrp    x1, __bss_start
     add     x1, x1, :lo12:__bss_start
     adrp    x2, __bss_end

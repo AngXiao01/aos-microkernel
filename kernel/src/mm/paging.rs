@@ -4,8 +4,8 @@
 use super::frame::FrameAllocator;
 use super::phys_to_virt;
 use crate::arch::mmu::{
-    self, ADDR_MASK, AF, AP_RO, DESC_BLOCK, DESC_PAGE, DESC_TABLE, DESC_VALID, MAIR_DEVICE, MAIR_NORMAL, PXN, SH_INNER,
-    UXN, attr_index,
+    self, ADDR_MASK, AF, AP_EL0, AP_RO, DESC_BLOCK, DESC_PAGE, DESC_TABLE, DESC_VALID, MAIR_DEVICE, MAIR_NORMAL, NG,
+    PXN, SH_INNER, UXN, attr_index,
 };
 
 pub const PAGE_SIZE: usize = 4096;
@@ -33,8 +33,9 @@ impl PageSize {
     }
 }
 
-/// Leaf descriptor attributes. Kernel mappings are global (nG = 0) and never accessible
-/// from EL0.
+/// Leaf descriptor attributes. Kernel mappings are global and inaccessible from EL0; user
+/// mappings are ASID-tagged (nG) and never executable at EL1. With SCTLR_EL1.WXN no
+/// mapping is both writable and executable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attrs(u64);
 
@@ -43,6 +44,9 @@ impl Attrs {
     pub const KERNEL_RO: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_RO | PXN | UXN);
     pub const KERNEL_RW: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | PXN | UXN);
     pub const DEVICE_RW: Attrs = Attrs(attr_index(MAIR_DEVICE) | PXN | UXN);
+    pub const USER_RX: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | AP_RO | NG | PXN);
+    pub const USER_RO: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | AP_RO | NG | PXN | UXN);
+    pub const USER_RW: Attrs = Attrs(attr_index(MAIR_NORMAL) | SH_INNER | AP_EL0 | NG | PXN | UXN);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,7 +241,8 @@ mod tests {
             let image_pa = virt_to_phys(layout::kernel_layout().image.start);
             // SAFETY: probing addresses that must not be mapped.
             let fault = kunwrap_err!(unsafe { probe::read_u64(image_pa) });
-            kassert!(fault.is_translation_fault(0), "low half: ESR {:#x}", fault.esr);
+            // TTBR0 holds whichever user address space ran last, so the walk may end at any level.
+            kassert!((0..4).any(|l| fault.is_translation_fault(l)), "low half: ESR {:#x}", fault.esr);
             let guard = layout::kernel_layout().stack_guard.start;
             let fault = kunwrap_err!(unsafe { probe::read_u64(guard) });
             kassert!(fault.is_translation_fault(3), "stack guard: ESR {:#x}", fault.esr);

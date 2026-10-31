@@ -11,7 +11,8 @@ test-core:
 check-nostd:
 	cargo build -p aos-types -p aos-log -p aos-branch --target aarch64-unknown-none
 
-# In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry).
+# In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry), including the
+# B-1 tests that run services/ktest-user.
 test-kernel:
 	kernel/scripts/ktest.sh
 
@@ -21,6 +22,8 @@ lint:
 	cd kernel && cargo fmt --check
 	cd kernel && cargo clippy --release -- -D warnings
 	cd kernel && cargo clippy --release --features ktest -- -D warnings
+	cd services && cargo fmt --check
+	cd services && cargo clippy --release -- -D warnings
 
 run:
 	kernel/scripts/qemu.sh
