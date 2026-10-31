@@ -10,7 +10,9 @@
 pub use aos_abi as abi;
 use aos_abi::{Error, IpcBuffer, MSG_REGS, MsgInfo, layout, sys};
 
+pub mod cap;
 pub mod debug;
+pub mod proto;
 
 core::arch::global_asm!(
     ".pushsection .text._start, \"ax\"",

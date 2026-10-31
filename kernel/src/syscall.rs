@@ -3,10 +3,11 @@
 
 use aos_abi::{Error, sys};
 
-use crate::ipc;
+use crate::cap::Cap;
 use crate::kobj::KPtr;
 use crate::sched::Kernel;
 use crate::thread::{Exit, Thread};
+use crate::{invoke, ipc};
 
 pub fn handle(k: &mut Kernel, t: KPtr<Thread>) {
     k.stats.syscalls += 1;
@@ -20,7 +21,11 @@ pub fn handle(k: &mut Kernel, t: KPtr<Thread>) {
         unsafe { t.get() }.set_status(e)
     };
     match number {
-        sys::CALL => ipc::send(k, t, true),
+        // CALL on a kernel object capability invokes one of its methods.
+        sys::CALL => match ipc::lookup(t, x0) {
+            Cap::Null | Cap::Endpoint { .. } | Cap::Notification { .. } => ipc::send(k, t, true),
+            _ => invoke::invoke(k, t, x0),
+        },
         sys::SEND => ipc::send(k, t, false),
         sys::RECV => ipc::recv(k, t),
         sys::REPLY => status(ipc::reply(k, t)),
@@ -49,7 +54,7 @@ fn debug_put(t: KPtr<Thread>) -> Error {
     // SAFETY: a short-lived reference to the running thread.
     let (len, buffer) = {
         let th = unsafe { t.get() };
-        (th.ctx.x[1] as usize, th.ipc_buffer)
+        (th.ctx.x[1] as usize, th.ipc_buffer())
     };
     let Some(pa) = buffer else { return Error::InvalidArgument };
     if len > DEBUG_BYTES {

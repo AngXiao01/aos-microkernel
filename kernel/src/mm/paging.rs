@@ -1,7 +1,6 @@
 //! Stage-1 translation tables: 4 KiB granule, 48-bit VA, four levels (L0–L3). Tables are
 //! identified by physical address and accessed through the linear map.
 
-use super::frame::FrameAllocator;
 use super::phys_to_virt;
 use crate::arch::mmu::{
     self, ADDR_MASK, AF, AP_EL0, AP_RO, DESC_BLOCK, DESC_PAGE, DESC_TABLE, DESC_VALID, MAIR_DEVICE, MAIR_NORMAL, NG,
@@ -61,6 +60,19 @@ pub enum MapError {
     OutOfMemory,
 }
 
+/// Where intermediate translation tables come from: the boot allocator (kernel and B-1
+/// spaces) or an address space object's own pool (spaces made from Untyped).
+pub trait TableAlloc {
+    /// A zeroed 4 KiB frame, by physical address.
+    fn table(&mut self) -> Option<usize>;
+}
+
+impl TableAlloc for super::frame::FrameAllocator {
+    fn table(&mut self) -> Option<usize> {
+        self.alloc()
+    }
+}
+
 const fn index(va: usize, level: usize) -> usize {
     (va >> (39 - 9 * level)) & 511
 }
@@ -90,7 +102,7 @@ pub fn map(
     pa: usize,
     size: PageSize,
     attrs: Attrs,
-    frames: &mut FrameAllocator,
+    tables: &mut impl TableAlloc,
 ) -> Result<(), MapError> {
     if !is_canonical(va) {
         return Err(MapError::NonCanonical);
@@ -107,7 +119,7 @@ pub fn map(
         let e = entry(table, index(va, level));
         let d = read(e);
         table = if d & DESC_VALID == 0 {
-            let next = frames.alloc().ok_or(MapError::OutOfMemory)?;
+            let next = tables.table().ok_or(MapError::OutOfMemory)?;
             write(e, next as u64 | DESC_TABLE | DESC_VALID);
             next
         } else if d & DESC_TABLE == 0 {

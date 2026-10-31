@@ -14,6 +14,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-memory"
+version = "0.1.0"
+dependencies = [
+ "aos-rt",
+]
+
+[[package]]
+name = "aos-root"
+version = "0.1.0"
+dependencies = [
+ "aos-rt",
+]
+
+[[package]]
 name = "aos-rt"
 version = "0.1.0"
 dependencies = [

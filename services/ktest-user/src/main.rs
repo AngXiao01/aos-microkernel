@@ -3,7 +3,7 @@
 #![no_std]
 #![no_main]
 
-use aos_rt::abi::{Error, MAX_MSG_WORDS, MsgInfo, ktest::*};
+use aos_rt::abi::{Error, MAX_MSG_WORDS, MsgInfo, ktest::*, ktest_b2, method};
 use aos_rt::{call, counter, counter_frequency, ipc_buffer, println, recv, reply_recv, send, signal, wait};
 
 aos_rt::entry!(main);
@@ -20,6 +20,7 @@ fn main(mode: u64, arg: u64) -> u64 {
         NOTIFY_SIGNAL => signal(SLOT_NOTIFICATION).status,
         FIFO_SENDER => send(SLOT_ENDPOINT, MsgInfo::new(arg, 0), [0; 4]).status,
         FIFO_RECEIVER => fifo_receiver(arg),
+        ktest_b2::MEM_CLIENT => mem_client(),
         _ => 0xbad,
     }
 }
@@ -279,4 +280,38 @@ fn fifo_receiver(count: u64) -> u64 {
         code |= (r.info.label() & 0xf) << (4 * i);
     }
     code
+}
+
+/// Gets a frame from the memory server, maps it, and checks it is fresh and private.
+fn mem_client() -> u64 {
+    use aos_rt::proto::memory::ALLOC_FRAMES;
+    const VA: u64 = 0x0000_0000_1000_0000;
+    ipc_buffer().recv_slot = ktest_b2::SLOT_RECEIVED;
+    let r = call(SLOT_ENDPOINT, MsgInfo::new(ALLOC_FRAMES, 1), [1, 0, 0, 0], 0);
+    if !r.is_ok() || r.info.caps() != 1 || r.words[0] != 1 {
+        println!("mem-client: allocation failed: {r:?}");
+        return 1;
+    }
+    if let Err(e) = aos_rt::cap::map(ktest_b2::SLOT_SPACE, ktest_b2::SLOT_RECEIVED, VA, method::WRITE) {
+        println!("mem-client: map failed: {e:?}");
+        return 2;
+    }
+    let words = VA as *mut u64;
+    for i in 0..512 {
+        // SAFETY: the frame is mapped read-write at VA.
+        if unsafe { words.add(i).read_volatile() } != 0 {
+            return 3;
+        }
+        // SAFETY: as above.
+        unsafe { words.add(i).write_volatile(i as u64 * 3) };
+    }
+    // SAFETY: as above.
+    if (0..512).any(|i| unsafe { words.add(i).read_volatile() } != i as u64 * 3) {
+        return 4;
+    }
+    if aos_rt::cap::retype(ktest_b2::SLOT_RECEIVED, 6, 20, 1).is_ok() {
+        return 5; // a frame is not an Untyped
+    }
+    println!("mem-client: got a fresh frame from the memory server");
+    0
 }

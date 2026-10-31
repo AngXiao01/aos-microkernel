@@ -243,7 +243,10 @@ mod tests {
     fn dedupe() -> ActionDecl {
         let version_type: TypeName = "ml/DatasetVersion".parse().unwrap();
         let mut inputs = BTreeMap::new();
-        inputs.insert("version".into(), InputSpec { kind: FieldKind::Ref { target: version_type.clone() }, default: None });
+        inputs.insert(
+            "version".into(),
+            InputSpec { kind: FieldKind::Ref { target: version_type.clone() }, default: None },
+        );
         inputs.insert(
             "threshold".into(),
             InputSpec {

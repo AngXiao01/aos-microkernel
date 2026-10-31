@@ -35,14 +35,44 @@ impl<T> fmt::Debug for KPtr<T> {
 }
 
 impl<T> KPtr<T> {
-    /// Moves `value` into a fresh frame; `None` when out of memory.
+    /// Moves `value` into fresh pages from the boot allocator; `None` when out of memory.
     pub fn new(value: T) -> Option<KPtr<T>> {
-        const { assert!(size_of::<T>() <= PAGE_SIZE && align_of::<T>() <= PAGE_SIZE) };
-        let pa = mm::with_frames(|f| f.alloc())?;
+        const { assert!(align_of::<T>() <= PAGE_SIZE) };
+        let size = size_of::<T>().div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let pa = mm::with_frames(|f| f.alloc_region(size, PAGE_SIZE))?;
+        // SAFETY: fresh, zeroed, page-aligned pages large enough for `T`.
+        Some(unsafe { KPtr::place(pa, value) })
+    }
+
+    /// An object whose valid initial state is all zero bytes (`CNode`), in fresh pages.
+    ///
+    /// # Safety
+    /// All-zero bytes must be a valid `T`.
+    pub unsafe fn zeroed() -> Option<KPtr<T>> {
+        let size = size_of::<T>().div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let pa = mm::with_frames(|f| f.alloc_region(size, PAGE_SIZE))?;
+        NonNull::new(phys_to_virt(pa) as *mut T).map(KPtr)
+    }
+
+    /// Moves `value` to physical address `pa` (memory carved from Untyped for it).
+    ///
+    /// # Safety
+    /// `[pa, pa + size_of::<T>())` must be RAM owned by the new object, suitably aligned.
+    pub unsafe fn place(pa: usize, value: T) -> KPtr<T> {
         let p = phys_to_virt(pa) as *mut T;
-        // SAFETY: the frame is fresh, mapped read-write, page-aligned and large enough.
+        // SAFETY: guaranteed by the caller.
         unsafe { p.write(value) };
-        NonNull::new(p).map(KPtr)
+        KPtr(NonNull::new(p).expect("the linear map has no null address"))
+    }
+
+    /// A reference to an object embedded in another kernel object (a slot in a CNode).
+    pub fn from_mut(value: &mut T) -> KPtr<T> {
+        KPtr(NonNull::from(value))
+    }
+
+    /// The physical address of the object.
+    pub fn pa(self) -> usize {
+        mm::virt_to_phys(self.0.as_ptr() as usize)
     }
 
     /// The object.

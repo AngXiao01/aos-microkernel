@@ -9,9 +9,9 @@
 
 use core::ptr;
 
-use aos_abi::{Error, IpcBuffer, MAX_MSG_WORDS, MSG_REGS, MsgInfo};
+use aos_abi::{Error, IpcBuffer, MAX_MSG_CAPS, MAX_MSG_WORDS, MSG_REGS, MsgInfo, rights};
 
-use crate::cap::{Cap, Rights};
+use crate::cap::{self, Cap, Rights};
 use crate::kobj::KPtr;
 use crate::mm::phys_to_virt;
 use crate::sched::Kernel;
@@ -27,13 +27,15 @@ enum EpState {
 }
 
 pub struct Endpoint {
+    /// Capabilities naming this endpoint.
+    pub refs: u32,
     queue: Queue,
     state: EpState,
 }
 
 impl Endpoint {
     pub const fn new() -> Endpoint {
-        Endpoint { queue: Queue::EMPTY, state: EpState::Idle }
+        Endpoint { refs: 0, queue: Queue::EMPTY, state: EpState::Idle }
     }
 
     /// Takes `t` out of this endpoint's queue (timeout, suspension).
@@ -54,13 +56,14 @@ impl Endpoint {
 }
 
 pub struct Notification {
+    pub refs: u32,
     bits: u64,
     waiters: Queue,
 }
 
 impl Notification {
     pub const fn new() -> Notification {
-        Notification { bits: 0, waiters: Queue::EMPTY }
+        Notification { refs: 0, bits: 0, waiters: Queue::EMPTY }
     }
 
     pub fn remove(&mut self, t: KPtr<Thread>) {
@@ -83,20 +86,62 @@ fn status(t: KPtr<Thread>, e: Error) {
     unsafe { t.get() }.set_status(e);
 }
 
-fn lookup(t: KPtr<Thread>, slot: u64) -> Cap {
+pub fn lookup(t: KPtr<Thread>, slot: u64) -> Cap {
     // SAFETY: see above.
-    unsafe { t.get().cspace.get() }.get(slot)
+    unsafe { t.get().cnode().map_or(Cap::Null, |c| c.get().get(slot)) }
 }
 
-/// Copies the message `src` is sending into `dst`'s registers and IPC buffer.
-fn transfer(src: KPtr<Thread>, dst: KPtr<Thread>, badge: u64) {
+fn buffer(pa: usize) -> *mut IpcBuffer {
+    phys_to_virt(pa) as *mut IpcBuffer
+}
+
+/// Copies the capabilities `src` sends into `dst`'s receive slots; returns how many arrived.
+/// Capabilities that cannot be copied (Untyped) and full or missing slots end the transfer.
+fn transfer_caps(src: KPtr<Thread>, dst: KPtr<Thread>, count: usize) -> usize {
+    // SAFETY: see above; the threads are distinct and we only read their bindings.
+    let (src_cnode, dst_cnode, src_buf, dst_buf) = unsafe {
+        let (s, d) = (src.get(), dst.get());
+        match (s.cnode(), d.cnode(), s.ipc_buffer(), d.ipc_buffer()) {
+            (Some(a), Some(b), Some(c), Some(e)) => (a, b, c, e),
+            _ => return 0,
+        }
+    };
+    // SAFETY: IPC buffer frames belong to the kernel and are mapped in the linear map.
+    let (slots, first) = unsafe { ((*buffer(src_buf)).caps, (*buffer(dst_buf)).recv_slot) };
+    if first == 0 {
+        return 0;
+    }
+    let mut received = 0;
+    for &from in slots.iter().take(count.min(MAX_MSG_CAPS)) {
+        // SAFETY: see above; source and destination slots are distinct (the destination is
+        // empty, the source is not).
+        let (from_slot, cap, to_slot) = unsafe {
+            let Some(from_slot) = src_cnode.get().slot(from) else { break };
+            let Some(cap) = cap::derive(from_slot.get().cap, rights::ALL, None) else { break };
+            let Some(to_slot) = dst_cnode.get().slot(first + received as u64) else { break };
+            if to_slot.get().cap != Cap::Null {
+                break;
+            }
+            (from_slot, cap, to_slot)
+        };
+        cap::insert(to_slot, cap, Some(from_slot));
+        received += 1;
+    }
+    received
+}
+
+/// Copies the message `src` is sending into `dst`'s registers and IPC buffer, and the
+/// capabilities it carries if `grant` allows.
+fn transfer(src: KPtr<Thread>, dst: KPtr<Thread>, badge: u64, grant: bool) {
     debug_assert!(src != dst);
+    let caps = MsgInfo(unsafe { src.get() }.ctx.x[1]).caps();
+    let received = if grant && caps > 0 { transfer_caps(src, dst, caps) } else { 0 };
     // SAFETY: see above; `src != dst`.
     let (s, d) = unsafe { (src.get(), dst.get()) };
     let info = MsgInfo(s.ctx.x[1]);
-    let buffers = s.ipc_buffer.zip(d.ipc_buffer);
+    let buffers = s.ipc_buffer().zip(d.ipc_buffer());
     let len = if buffers.is_some() { info.len() } else { info.len().min(MSG_REGS) };
-    d.ctx.x[1] = MsgInfo::new(info.label(), len).0;
+    d.ctx.x[1] = MsgInfo::new(info.label(), len).with_caps(received).0;
     d.ctx.x[2..2 + MSG_REGS].copy_from_slice(&s.ctx.x[2..2 + MSG_REGS]);
     d.ctx.x[6] = badge;
     if let Some((sp, dp)) = buffers
@@ -121,7 +166,7 @@ fn transfer(src: KPtr<Thread>, dst: KPtr<Thread>, badge: u64) {
 fn await_reply(k: &mut Kernel, caller: KPtr<Thread>, server: KPtr<Thread>) {
     // SAFETY: see above; caller and server are distinct.
     let (c, s) = unsafe { (caller.get(), server.get()) };
-    c.reply_token += 1;
+    c.reply_token = k.next_reply_token();
     c.state = ThreadState::BlockedReply;
     c.blocked_on = Blocked::Nothing;
     s.caller = Some((caller, c.reply_token));
@@ -140,10 +185,11 @@ pub fn send(k: &mut Kernel, t: KPtr<Thread>, is_call: bool) {
     }
     // SAFETY: see above.
     let e = unsafe { ep.get() };
+    let grant = rights.contains(Rights::GRANT);
     if e.state == EpState::Receivers {
         let r = e.pop().expect("receivers queued");
         k.cancel_timeout(r);
-        transfer(t, r, badge);
+        transfer(t, r, badge, grant);
         status(r, Error::Ok);
         // SAFETY: see above.
         unsafe { r.get() }.blocked_on = Blocked::Nothing;
@@ -158,6 +204,7 @@ pub fn send(k: &mut Kernel, t: KPtr<Thread>, is_call: bool) {
         // SAFETY: see above.
         let th = unsafe { t.get() };
         th.send_badge = badge;
+        th.send_grant = grant;
         th.send_is_call = is_call;
         th.state = ThreadState::BlockedSend;
         th.blocked_on = Blocked::Endpoint(ep);
@@ -180,12 +227,12 @@ pub fn recv(k: &mut Kernel, t: KPtr<Thread>) {
     if e.state == EpState::Senders {
         let s = e.pop().expect("senders queued");
         // SAFETY: see above.
-        let (badge, is_call) = {
+        let (badge, grant, is_call) = {
             let st = unsafe { s.get() };
             st.blocked_on = Blocked::Nothing;
-            (st.send_badge, st.send_is_call)
+            (st.send_badge, st.send_grant, st.send_is_call)
         };
-        transfer(s, t, badge);
+        transfer(s, t, badge, grant);
         status(t, Error::Ok);
         if is_call {
             await_reply(k, s, t); // the caller's deadline, if any, now covers the reply
@@ -214,15 +261,20 @@ pub fn reply(k: &mut Kernel, t: KPtr<Thread>) -> Error {
     }
     // SAFETY: see above.
     let Some((caller, token)) = unsafe { t.get() }.caller.take() else { return Error::NoReply };
+    // The caller may have been destroyed since: only trust it if it is still a live thread.
+    if !k.is_live(caller) {
+        return Error::NoReply;
+    }
     // SAFETY: see above; the caller is blocked, so it is not `t`.
     let waiting = {
         let c = unsafe { caller.get() };
         c.state == ThreadState::BlockedReply && c.reply_token == token
     };
     if !waiting {
-        return Error::NoReply; // the call timed out, or the caller is gone
+        return Error::NoReply; // the call timed out
     }
-    transfer(t, caller, 0);
+    // A reply may always carry capabilities: the caller asked for it.
+    transfer(t, caller, 0, true);
     status(caller, Error::Ok);
     k.cancel_timeout(caller);
     k.make_ready(caller);
@@ -270,4 +322,28 @@ pub fn wait(k: &mut Kernel, t: KPtr<Thread>) {
         k.set_timeout(t, timeout);
         k.leave_cpu(t);
     }
+}
+
+/// The last capability to an endpoint is gone: its waiters fail with `InvalidCap`.
+pub fn destroy_endpoint(k: &mut Kernel, ep: KPtr<Endpoint>) {
+    // SAFETY: see above.
+    while let Some(t) = unsafe { ep.get() }.pop() {
+        wake_failed(k, t);
+    }
+}
+
+pub fn destroy_notification(k: &mut Kernel, ntfn: KPtr<Notification>) {
+    // SAFETY: see above.
+    while let Some(t) = unsafe { ntfn.get() }.waiters.pop_front(queue_link) {
+        wake_failed(k, t);
+    }
+}
+
+fn wake_failed(k: &mut Kernel, t: KPtr<Thread>) {
+    k.cancel_timeout(t);
+    // SAFETY: see above.
+    let th = unsafe { t.get() };
+    th.blocked_on = Blocked::Nothing;
+    th.set_status(Error::InvalidCap);
+    k.make_ready(t);
 }

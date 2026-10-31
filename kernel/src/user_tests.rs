@@ -12,7 +12,7 @@ use crate::process;
 use crate::sched::{KERNEL, Kernel};
 use crate::thread::{Exit, Thread, ThreadState};
 
-static IMAGE: &[u8] = include_bytes!(concat!(env!("AOS_KTEST_USER_DIR"), "/ktest-user"));
+pub static IMAGE: &[u8] = include_bytes!(concat!(env!("AOS_SERVICES_DIR"), "/ktest-user"));
 
 fn spawn(k: &mut Kernel, mode: u64, arg: u64, priority: u8) -> KPtr<Thread> {
     process::spawn(k, IMAGE, priority, [mode, arg]).expect("spawn ktest-user")
@@ -20,7 +20,8 @@ fn spawn(k: &mut Kernel, mode: u64, arg: u64, priority: u8) -> KPtr<Thread> {
 
 fn give(t: KPtr<Thread>, slot: u64, cap: Cap) {
     // SAFETY: test setup; the thread has not run and nothing else references its CNode.
-    unsafe { t.get().cspace.get() }.set(slot as usize, cap);
+    let slot = unsafe { t.get().cnode().expect("bound").get().slot(slot).expect("in range") };
+    crate::cap::insert(slot, cap, None);
 }
 
 fn endpoint() -> KPtr<Endpoint> {
@@ -165,4 +166,58 @@ ktest! {
         kassert!(run(&mut k, &[t], 10));
         kassert_eq!(exit_of(t), Some(Exit::Code(aos_abi::Error::NoRight as u64)));
     }
+}
+
+/// BS2 (§B11), run last because it hands all remaining memory to the root task: the root
+/// task starts the memory server and a client, gives away its Untyped and exits; the client
+/// gets a frame from the memory server; afterwards no process holds all of memory.
+pub fn root_task_distributes_and_exits() -> crate::ktest::TestResult {
+    use crate::invoke::holdings;
+    let mut k = KERNEL.lock();
+    let modules = [
+        crate::root::Module { name: "root", image: crate::BOOT_MODULES[0].image },
+        crate::root::Module { name: "memory", image: crate::BOOT_MODULES[1].image },
+        crate::root::Module { name: "ktest-user", image: IMAGE },
+    ];
+    let root = kunwrap!(crate::root::start(&mut k, &modules));
+    let total_untyped = {
+        // SAFETY: as above.
+        let cnode = kunwrap!(unsafe { root.get() }.cnode().ok_or("root cnode"));
+        holdings(cnode).untyped_bytes
+    };
+    kassert!(total_untyped > 0);
+    let give_up = timer::now() + 60 * timer::frequency();
+    let settled = k.run_until(
+        |k| {
+            // Done when the root task has exited and every other thread ended or waits.
+            // SAFETY: called between traps.
+            unsafe { root.get() }.state == ThreadState::Inactive
+                && k.threads()
+                    .all(|t| matches!(unsafe { t.get() }.state, ThreadState::Inactive | ThreadState::BlockedRecv))
+        },
+        give_up,
+    );
+    kassert!(settled, "the boot did not settle");
+    kassert_eq!(exit_of(root), Some(Exit::Code(0)));
+    crate::invoke::dump(&k);
+    let mut client_ok = false;
+    let mut holders = 0;
+    for t in k.threads() {
+        // SAFETY: no thread is running.
+        let (exit, cnode) = unsafe { (t.get().exit, t.get().cnode()) };
+        if t != root && exit == Some(Exit::Code(0)) {
+            client_ok = true;
+        }
+        let held = cnode.map(holdings).unwrap_or_default();
+        kassert!(held.untyped_bytes < total_untyped, "a process holds all of memory (BS2)");
+        if held.untyped_bytes > 0 {
+            holders += 1;
+        }
+    }
+    kassert!(client_ok, "the memory client did not succeed");
+    // SAFETY: as above.
+    let root_held = holdings(kunwrap!(unsafe { root.get() }.cnode().ok_or("root cnode")));
+    kassert_eq!(root_held.untyped_caps, 0, "the root task kept Untyped");
+    kassert_eq!(holders, 1, "only the memory server holds Untyped");
+    Ok(())
 }

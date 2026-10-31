@@ -11,6 +11,8 @@ pub struct FrameAllocator {
     /// Only frames below this address are handed out (the part of RAM that is mapped).
     limit: usize,
     allocated: usize,
+    /// Set once the remaining memory became Untyped: from then on nothing is handed out.
+    sealed: bool,
 }
 
 impl FrameAllocator {
@@ -25,7 +27,7 @@ impl FrameAllocator {
             free.subtract(r.align_outward(PAGE_SIZE))?;
         }
         free.sort_by_start();
-        Ok(FrameAllocator { free, limit: usize::MAX, allocated: 0 })
+        Ok(FrameAllocator { free, limit: usize::MAX, allocated: 0, sealed: false })
     }
 
     pub fn set_limit(&mut self, limit: usize) {
@@ -34,16 +36,33 @@ impl FrameAllocator {
 
     /// A zeroed frame, by physical address.
     pub fn alloc(&mut self) -> Option<usize> {
+        self.alloc_region(PAGE_SIZE, PAGE_SIZE)
+    }
+
+    /// `size` zeroed bytes aligned to `align` (both multiples of the page size).
+    pub fn alloc_region(&mut self, size: usize, align: usize) -> Option<usize> {
+        if self.sealed {
+            return None;
+        }
         let limit = self.limit;
-        let region =
-            self.free.as_mut_slice().iter_mut().find(|r| r.len() >= PAGE_SIZE && r.start + PAGE_SIZE <= limit)?;
-        let pa = region.start;
-        region.start += PAGE_SIZE;
-        self.allocated += 1;
-        // SAFETY: `pa` is free RAM below `limit`, which the current tables map at
-        // `phys_to_virt(pa)`; nothing else references it.
-        unsafe { core::ptr::write_bytes(phys_to_virt(pa) as *mut u8, 0, PAGE_SIZE) };
-        Some(pa)
+        let region = self.free.as_mut_slice().iter_mut().find(|r| {
+            let start = super::region::align_up(r.start, align);
+            start.checked_add(size).is_some_and(|end| end <= r.end && end <= limit)
+        })?;
+        let start = super::region::align_up(region.start, align);
+        // The gap below an aligned start is given up: the boot allocator never frees.
+        region.start = start + size;
+        self.allocated += size / PAGE_SIZE;
+        // SAFETY: `[start, start + size)` is free RAM below `limit`, mapped in the linear map;
+        // nothing else references it.
+        unsafe { core::ptr::write_bytes(phys_to_virt(start) as *mut u8, 0, size) };
+        Some(start)
+    }
+
+    /// Hands every remaining free byte over (to become Untyped) and stops allocating.
+    pub fn seal(&mut self) -> RegionList<32> {
+        self.sealed = true;
+        core::mem::replace(&mut self.free, RegionList::new())
     }
 
     pub fn allocated(&self) -> usize {

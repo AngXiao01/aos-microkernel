@@ -120,7 +120,16 @@ pub fn run_all() -> ! {
             }
         }
     }
-    let passed = tests.len() - failed;
+    // Last: it hands all remaining memory to the root task, so nothing can allocate after.
+    let name = "aos_kernel::user_tests::root_task_distributes_and_exits";
+    match crate::user_tests::root_task_distributes_and_exits() {
+        Ok(()) => kprintln!("[ok]   {name}"),
+        Err(Failure) => {
+            failed += 1;
+            kprintln!("[FAIL] {name}");
+        }
+    }
+    let passed = tests.len() + 1 - failed;
     kprintln!("KTEST SUMMARY passed={} failed={}", passed, failed);
     semihosting::exit(if failed == 0 && passed > 0 { 0 } else { 1 })
 }

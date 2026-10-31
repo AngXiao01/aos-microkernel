@@ -21,6 +21,7 @@ AOS（agent-native OS）的微内核版：从零编写的 Rust 能力式微内�
 | M1 日志、事务、分支、变更单、撤销 | 完成 | `make test-core`：§16.1 日志、事务、分支、撤销部分（含两个 10⁴ 例的属性测试）；`cargo run --release -p aos-conformance --example perf` 测 §7.8 |
 | M2 动作声明、WASM 运行时、宿主 ABI、能力令牌 | 完成 | `make test-core`：§16.1 能力（衰减不变量、越权拒绝、额度扣减，含属性测试）与动作沙箱（未声明读写、直接 I/O、出口、燃料、前置条件、污点） |
 | B-0 aarch64 virt 启动、串口、异常向量、页表 | 完成 | `make test-kernel`：EL1 进入（512 MiB）与 EL2 进入（4 GiB）两种配置下的内核单元测试 |
+| B-2 能力系统（派生、撤销）、root task 分发、memory server | 完成 | `make test-kernel`：能力单元测试（retype、衰减、派生树、对象销毁、撤销 Untyped、帧映射）与 BS2（root 分发后退出，memory server 发放帧，无进程持有全部 Untyped） |
 | B-1 线程、调度、地址空间、同步 IPC | 完成 | `make test-kernel`：IPC ping-pong（2000 次往返，16 字消息）、三线程抢占下的全寄存器（含 FP/SIMD、FPCR）完整性、超时、故障隔离、通知、FIFO、权限 |
 
 ## 开发
@@ -60,7 +61,7 @@ tests/conformance/ 核心一致性套件（§16.1），与存储后端无关
 actions/          WASM 动作：sdk（guest 侧库）、test-script（运行时测试用的脚本动作）
 kernel/           微内核：启动、异常、页表、FDT、GIC、定时器、线程、调度、IPC；scripts/ 下是 QEMU 启动与测试脚本
 kernel/abi/       内核与用户态共用的 ABI（系统调用号、消息布局、用户地址布局）
-services/         用户态程序：rt（运行时）、ktest-user（内核测试驱动的用户程序）
+services/         用户态程序：rt（运行时）、root（root task）、memory（memory server）、ktest-user（内核测试驱动的用户程序）
 ```
 
 §18 规定的其余目录（`compute-worker/`、`view/`、`confirmer-ios/`）在对应里程碑创建。

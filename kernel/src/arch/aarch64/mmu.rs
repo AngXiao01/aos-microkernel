@@ -63,6 +63,15 @@ pub fn flush_tlb_page(va: usize) {
     };
 }
 
+/// Invalidates every TLB entry tagged with `asid` (an address space was destroyed).
+pub fn flush_asid(asid: u16) {
+    let operand = u64::from(asid) << 48;
+    // SAFETY: TLB maintenance only removes cached translations.
+    unsafe {
+        asm!("dsb ishst", "tlbi aside1is, {}", "dsb ish", "isb", in(reg) operand, options(nostack, preserves_flags))
+    };
+}
+
 /// Installs new translation tables and drops all cached translations.
 ///
 /// # Safety

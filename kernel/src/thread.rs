@@ -1,7 +1,7 @@
 //! Threads (TCBs) and the intrusive queues they wait in.
 
 use crate::arch::user::{FpState, SPSR_EL0, UserContext};
-use crate::cap::CNode;
+use crate::cap::{CNode, Cap, Slot};
 use crate::ipc::{Endpoint, Notification};
 use crate::kobj::KPtr;
 use crate::vspace::AddressSpace;
@@ -42,30 +42,37 @@ pub struct Links {
 pub struct Thread {
     pub ctx: UserContext,
     pub fp: FpState,
+    /// Capabilities naming this thread.
+    pub refs: u32,
     pub id: u32,
     pub state: ThreadState,
     /// 0 (lowest) to 255.
     pub priority: u8,
     /// Ticks left before round-robin preemption.
     pub timeslice: u32,
-    pub vspace: KPtr<AddressSpace>,
-    pub cspace: KPtr<CNode>,
-    /// Physical address of the IPC buffer frame, mapped at `layout::IPC_BUFFER`.
-    pub ipc_buffer: Option<usize>,
+    /// The thread's capability space, address space and IPC buffer frame: capabilities,
+    /// children of those the thread was configured from.
+    pub cspace_slot: Slot,
+    pub vspace_slot: Slot,
+    pub ipc_slot: Slot,
     /// Ready queue, endpoint queue or notification queue: at most one at a time.
     pub queue: Links,
     /// The timeout list.
     pub timer: Links,
+    /// The kernel's list of all threads (capability audit, reply validation).
+    pub all: Links,
     /// Counter value at which a blocking call times out.
     pub deadline: Option<u64>,
     pub blocked_on: Blocked,
-    /// While blocked sending: the badge of the capability used and whether it is a call.
+    /// While blocked sending: the badge and rights of the capability used, and whether it
+    /// is a call.
     pub send_badge: u64,
+    pub send_grant: bool,
     pub send_is_call: bool,
     /// The caller this thread owes a reply, with the caller's reply token at the time.
     pub caller: Option<(KPtr<Thread>, u64)>,
-    /// Incremented whenever this thread starts waiting for a reply, so that a reply meant
-    /// for an earlier, timed-out call is not delivered to a later one.
+    /// Unique per wait for a reply, so that a reply meant for an earlier, timed-out call is
+    /// not delivered to a later one.
     pub reply_token: u64,
     pub exit: Option<Exit>,
 }
@@ -82,36 +89,58 @@ pub struct Start {
 }
 
 impl Thread {
-    pub fn new(
-        id: u32,
-        vspace: KPtr<AddressSpace>,
-        cspace: KPtr<CNode>,
-        start: Start,
-        priority: u8,
-        ipc_buffer: Option<usize>,
-    ) -> Thread {
-        let mut ctx = UserContext { x: [0; 31], sp_el0: start.stack_top, elr: start.entry, spsr: SPSR_EL0 };
-        ctx.x[0] = start.args[0];
-        ctx.x[1] = start.args[1];
+    /// An inactive thread with no address space, capability space or IPC buffer.
+    pub fn new(id: u32) -> Thread {
         Thread {
-            ctx,
+            ctx: UserContext { x: [0; 31], sp_el0: 0, elr: 0, spsr: SPSR_EL0 },
             fp: FpState::ZERO,
+            refs: 0,
             id,
             state: ThreadState::Inactive,
-            priority,
+            priority: 0,
             timeslice: TIMESLICE_TICKS,
-            vspace,
-            cspace,
-            ipc_buffer,
+            cspace_slot: Slot::EMPTY,
+            vspace_slot: Slot::EMPTY,
+            ipc_slot: Slot::EMPTY,
             queue: Links::default(),
             timer: Links::default(),
+            all: Links::default(),
             deadline: None,
             blocked_on: Blocked::Nothing,
             send_badge: 0,
+            send_grant: false,
             send_is_call: false,
             caller: None,
             reply_token: 0,
             exit: None,
+        }
+    }
+
+    pub fn set_start(&mut self, start: Start) {
+        self.ctx = UserContext { x: [0; 31], sp_el0: start.stack_top, elr: start.entry, spsr: SPSR_EL0 };
+        self.ctx.x[0] = start.args[0];
+        self.ctx.x[1] = start.args[1];
+    }
+
+    pub fn cnode(&self) -> Option<KPtr<CNode>> {
+        match self.cspace_slot.cap {
+            Cap::CNode(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn space(&self) -> Option<KPtr<AddressSpace>> {
+        match self.vspace_slot.cap {
+            Cap::AddressSpace(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    /// Physical address of the IPC buffer frame.
+    pub fn ipc_buffer(&self) -> Option<usize> {
+        match self.ipc_slot.cap {
+            Cap::Frame { pa, .. } => Some(pa),
+            _ => None,
         }
     }
 
@@ -129,6 +158,10 @@ pub fn queue_link(t: &mut Thread) -> &mut Links {
 
 pub fn timer_link(t: &mut Thread) -> &mut Links {
     &mut t.timer
+}
+
+pub fn all_link(t: &mut Thread) -> &mut Links {
+    &mut t.all
 }
 
 /// A doubly linked FIFO of threads threaded through one of their `Links`.
@@ -203,6 +236,11 @@ impl Queue {
         Some(t)
     }
 
+    /// Every thread in the queue, front to back.
+    pub fn iter(&self, link: LinkOf) -> QueueIter {
+        QueueIter { next: self.head, link }
+    }
+
     /// Removes `t`, which must be in this queue.
     pub fn remove(&mut self, t: KPtr<Thread>, link: LinkOf) {
         // SAFETY: see impl.
@@ -218,5 +256,21 @@ impl Queue {
             }
             *link(t.get()) = Links::default();
         }
+    }
+}
+
+pub struct QueueIter {
+    next: Option<KPtr<Thread>>,
+    link: LinkOf,
+}
+
+impl Iterator for QueueIter {
+    type Item = KPtr<Thread>;
+
+    fn next(&mut self) -> Option<KPtr<Thread>> {
+        let t = self.next?;
+        // SAFETY: queued threads are live; the reference ends here.
+        self.next = (self.link)(unsafe { t.get() }).next;
+        Some(t)
     }
 }

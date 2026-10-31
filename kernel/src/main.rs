@@ -18,14 +18,18 @@ mod ktest;
 
 mod arch;
 mod cap;
+#[cfg(feature = "ktest")]
+mod cap_tests;
 mod elf;
 mod fdt;
+mod invoke;
 mod ipc;
 mod irq;
 mod kobj;
 mod mm;
 mod pl011;
 mod process;
+mod root;
 mod sched;
 mod sync;
 mod syscall;
@@ -54,6 +58,15 @@ pub struct BootInfo {
 }
 
 static BOOT_INFO: sync::SetOnce<BootInfo> = sync::SetOnce::new();
+
+macro_rules! service {
+    ($name:literal) => {
+        root::Module { name: $name, image: include_bytes!(concat!(env!("AOS_SERVICES_DIR"), "/", $name)) }
+    };
+}
+
+/// The programs the root task receives (built from services/ by build.rs).
+pub static BOOT_MODULES: [root::Module; 2] = [service!("root"), service!("memory")];
 
 pub fn boot_info() -> &'static BootInfo {
     BOOT_INFO.get().expect("boot info not recorded yet")
@@ -111,8 +124,9 @@ extern "C" fn kernel_main(dtb_pa: usize) -> ! {
 
     #[cfg(not(feature = "ktest"))]
     {
-        kprintln!("boot complete; no root task yet (B-2), idling");
-        sched::KERNEL.lock().run_until(|_| false, u64::MAX);
+        let mut k = sched::KERNEL.lock();
+        root::start(&mut k, &BOOT_MODULES).unwrap_or_else(|e| panic!("root task: {e:?}"));
+        k.run_until(|_| false, u64::MAX);
         arch::cpu::halt()
     }
 }

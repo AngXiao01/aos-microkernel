@@ -7,12 +7,13 @@
 
 use crate::arch::exception::{EL0_IRQ, EL0_SYNC, ec, exception_class};
 use crate::arch::{cpu, timer, user};
+use crate::cap;
 use crate::irq;
 use crate::kobj::KPtr;
 use crate::sync::SpinLock;
 use crate::syscall;
-use crate::thread::{Blocked, Exit, Queue, TIMESLICE_TICKS, Thread, ThreadState, queue_link, timer_link};
-use crate::vspace::AsidAllocator;
+use crate::thread::{Blocked, Exit, Queue, TIMESLICE_TICKS, Thread, ThreadState, all_link, queue_link, timer_link};
+use crate::vspace::Spaces;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stats {
@@ -34,9 +35,12 @@ pub struct Kernel {
     /// The thread whose FP/SIMD state is in the registers.
     fp_owner: Option<KPtr<Thread>>,
     last_run: Option<KPtr<Thread>>,
-    pub asids: AsidAllocator,
+    /// Every thread object that exists.
+    threads: Queue,
+    pub spaces: Spaces,
     pub stats: Stats,
     next_id: u32,
+    next_reply_token: u64,
 }
 
 // SAFETY: there is one CPU, and kernel state is only touched from the run loop.
@@ -55,15 +59,57 @@ impl Kernel {
             timers: Queue::EMPTY,
             fp_owner: None,
             last_run: None,
-            asids: AsidAllocator::new(),
+            threads: Queue::EMPTY,
+            spaces: Spaces::new(),
             stats: Stats { switches: 0, preemptions: 0, syscalls: 0, ticks: 0 },
             next_id: 1,
+            next_reply_token: 1,
         }
     }
 
-    pub fn next_thread_id(&mut self) -> u32 {
+    /// Records a newly created thread object and returns its id.
+    pub fn register(&mut self, t: KPtr<Thread>) -> u32 {
+        let id = self.next_id;
         self.next_id += 1;
-        self.next_id - 1
+        // SAFETY: see impl.
+        unsafe { t.get() }.id = id;
+        self.threads.push_back(t, all_link);
+        id
+    }
+
+    /// Whether `t` names a thread object that still exists.
+    pub fn is_live(&self, t: KPtr<Thread>) -> bool {
+        self.threads.iter(all_link).any(|x| x == t)
+    }
+
+    pub fn threads(&self) -> impl Iterator<Item = KPtr<Thread>> {
+        self.threads.iter(all_link)
+    }
+
+    pub fn next_reply_token(&mut self) -> u64 {
+        self.next_reply_token += 1;
+        self.next_reply_token
+    }
+
+    /// The last capability to `t` is gone: stop it and drop its bindings.
+    pub fn destroy_thread(&mut self, t: KPtr<Thread>) {
+        self.suspend(t);
+        self.threads.remove(t, all_link);
+        if self.fp_owner == Some(t) {
+            self.fp_owner = None;
+        }
+        if self.last_run == Some(t) {
+            self.last_run = None;
+        }
+        // SAFETY: see impl; the slots are inside the thread object, which stays intact until
+        // its memory is retyped again (after its Untyped is revoked).
+        let slots = unsafe {
+            let th = t.get();
+            [KPtr::from_mut(&mut th.cspace_slot), KPtr::from_mut(&mut th.vspace_slot), KPtr::from_mut(&mut th.ipc_slot)]
+        };
+        for slot in slots {
+            cap::delete(self, slot);
+        }
     }
 
     fn enqueue(&mut self, t: KPtr<Thread>, front: bool) {
@@ -115,6 +161,19 @@ impl Kernel {
         unsafe { t.get() }.state = ThreadState::Running;
         self.current = Some(t);
         Some(t)
+    }
+
+    /// The thread to run next, skipping (and stopping) threads whose address space was
+    /// revoked.
+    fn pick_runnable(&mut self) -> Option<KPtr<Thread>> {
+        loop {
+            let t = self.pick()?;
+            // SAFETY: see impl.
+            if unsafe { t.get() }.space().is_some() {
+                return Some(t);
+            }
+            self.suspend(t);
+        }
     }
 
     /// Takes `t` off the CPU after it blocked or ended.
@@ -233,8 +292,8 @@ impl Kernel {
             self.fp_owner = Some(t);
         }
         if self.last_run != Some(t) {
-            // SAFETY: see impl.
-            unsafe { t.get().vspace.get() }.activate();
+            // SAFETY: see impl; `pick_runnable` checked that the space exists.
+            unsafe { t.get().space().expect("checked").get() }.activate();
             self.last_run = Some(t);
             self.stats.switches += 1;
         }
@@ -274,7 +333,7 @@ impl Kernel {
             if timer::now() >= give_up_at {
                 return false;
             }
-            let Some(t) = self.pick() else {
+            let Some(t) = self.pick_runnable() else {
                 user::wait_for_interrupt();
                 continue;
             };
