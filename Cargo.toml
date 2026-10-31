@@ -9,6 +9,9 @@ members = [
     "core/aos-cap",
     "core/aos-action",
     "core/aos-runtime",
+    "core/aos-policy",
+    "core/aos-confirm",
+    "core/aos-egress",
     "tests/conformance",
 ]
 exclude = ["kernel", "services"]

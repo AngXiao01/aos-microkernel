@@ -33,3 +33,8 @@ SPEC.md 内部的矛盾与缺口（§0）。每条记录出处和当前选择；
 
 - 出处：§8.3.2 写"没有时钟以外的系统调用"，暗示动作可以读时钟；§8.4 的宿主 ABI 却没有时钟调用。动作若能读墙钟，撤销与重放的一致性测试（§16.1）就不再确定。
 - 选择（更少能力）：宿主 ABI 不提供时钟。动作需要时间时，由运行时把当前事务的时间戳作为只读输入提供（同一事务内固定）。
+
+## Q7 deny 规则里 `max_sensitivity` 的含义
+
+- 出处：§9.3 的示例里，`allow: { channel: "model:default", max_sensitivity: internal }` 的意思是"敏感度不超过 internal 时放行"；而 `deny: { channel: "*", max_sensitivity: secret }` 按字面是"不超过 secret 时拒绝"，那就会拒绝一切出口，显然不是本意。
+- 选择：拆成两个条件。`sensitivity_at_most` 用于 allow/confirm，`sensitivity_at_least` 用于 deny；示例中的 deny 规则读作"敏感度达到 secret 时拒绝"。两种读法都不会放出 secret 数据，这样读的拒绝范围更窄但明确。

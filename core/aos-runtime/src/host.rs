@@ -524,15 +524,14 @@ impl<S: LogStorage, E: Env> Host<S, E> {
         }
         let target = String::from(field(&m, "target")?.as_text().ok_or(BAD)?);
         let summary = String::from(field(&m, "summary")?.as_text().ok_or(BAD)?);
-        let blobs: Vec<Value> = match m.get_str("blobs") {
-            Some(b) => b
-                .as_array()
-                .ok_or(BAD)?
-                .iter()
-                .map(|h| hash_from_cbor(h).map(Value::Blob).map_err(|_| BAD))
-                .collect::<Result<_, _>>()?,
+        let hashes: Vec<Hash256> = match m.get_str("blobs") {
+            Some(b) => {
+                b.as_array().ok_or(BAD)?.iter().map(|h| hash_from_cbor(h).map_err(|_| BAD)).collect::<Result<_, _>>()?
+            }
             None => Vec::new(),
         };
+        let payload_hash = aos_egress::payload_hash(&hashes);
+        let blobs: Vec<Value> = hashes.into_iter().map(Value::Blob).collect();
         if !self.decl.effects.may_egress(&channel)
             || self.world.authority.authorize_egress(&self.token, self.now, &channel).is_err()
         {
@@ -549,6 +548,7 @@ impl<S: LogStorage, E: Env> Host<S, E> {
         fields.insert("target".into(), Value::Text(target));
         fields.insert("summary".into(), Value::Text(summary));
         fields.insert("blobs".into(), Value::List(blobs));
+        fields.insert("payload_hash".into(), Value::Bytes(payload_hash.0.to_vec()));
         fields.insert("action".into(), Value::Text(self.decl.id()));
         fields.insert("external_reversibility".into(), Value::text(reversibility));
         fields.insert("status".into(), Value::text("pending"));

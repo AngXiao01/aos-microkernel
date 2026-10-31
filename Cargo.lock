@@ -27,13 +27,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-confirm"
+version = "0.1.0"
+dependencies = [
+ "aos-types",
+ "p256",
+]
+
+[[package]]
 name = "aos-conformance"
 version = "0.1.0"
 dependencies = [
  "aos-action",
  "aos-branch",
  "aos-cap",
+ "aos-confirm",
+ "aos-egress",
  "aos-log",
+ "aos-policy",
  "aos-runtime",
  "aos-types",
  "proptest",
@@ -41,7 +52,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-egress"
+version = "0.1.0"
+dependencies = [
+ "aos-confirm",
+ "aos-policy",
+ "aos-types",
+]
+
+[[package]]
 name = "aos-log"
+version = "0.1.0"
+dependencies = [
+ "aos-types",
+]
+
+[[package]]
+name = "aos-policy"
 version = "0.1.0"
 dependencies = [
  "aos-types",
@@ -54,6 +81,7 @@ dependencies = [
  "aos-action",
  "aos-branch",
  "aos-cap",
+ "aos-egress",
  "aos-log",
  "aos-types",
  "wasmi",

@@ -13,6 +13,9 @@ aos-branch = { path = "../../core/aos-branch" }
 aos-cap = { path = "../../core/aos-cap" }
 aos-action = { path = "../../core/aos-action" }
 aos-runtime = { path = "../../core/aos-runtime" }
+aos-policy = { path = "../../core/aos-policy" }
+aos-confirm = { path = "../../core/aos-confirm", features = ["dev-confirmer"] }
+aos-egress = { path = "../../core/aos-egress" }
 wat = "1"
 
 [dev-dependencies]
