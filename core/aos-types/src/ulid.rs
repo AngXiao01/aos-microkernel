@@ -116,6 +116,12 @@ impl UlidGenerator {
         UlidGenerator { last: None }
     }
 
+    /// Continues after `last`, e.g. the largest ULID found when replaying a log, so ULIDs
+    /// keep increasing across restarts even if the clock went backwards.
+    pub const fn resume(last: Ulid) -> UlidGenerator {
+        UlidGenerator { last: Some(last) }
+    }
+
     pub fn generate(&mut self, now_ms: u64, entropy: [u8; 10]) -> Result<Ulid, UlidError> {
         let next = match self.last {
             Some(last) if now_ms <= last.timestamp_ms() => {

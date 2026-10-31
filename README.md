@@ -18,6 +18,7 @@ AOS（agent-native OS）的微内核版：从零编写的 Rust 能力式微内�
 | 里程碑 | 状态 | 验收 |
 |---|---|---|
 | M0 核心库骨架：类型、对象、CBOR、哈希 | 完成 | `make test-core`：单元测试 + 每项 10⁴ 例的 CBOR 属性测试 |
+| M1 日志、事务、分支、变更单、撤销 | 完成 | `make test-core`：§16.1 日志、事务、分支、撤销部分（含两个 10⁴ 例的属性测试）；`cargo run --release -p aos-conformance --example perf` 测 §7.8 |
 | B-0 aarch64 virt 启动、串口、异常向量、页表 | 完成 | `make test-kernel`：EL1 进入（512 MiB）与 EL2 进入（4 GiB）两种配置下的内核单元测试 |
 
 ## 开发
@@ -48,6 +49,9 @@ gdb-multiarch kernel/target/aarch64-unknown-none-softfloat/release/aos-kernel -e
 
 ```
 core/aos-types/   对象、类型、确定性 CBOR、SHA-256、ULID（no_std + alloc）
+core/aos-log/     只追加、哈希链接的日志，存储后端经 LogStorage trait（no_std）
+core/aos-branch/  事务、分支、提交、撤销、变更单（no_std）
+tests/conformance/ 核心一致性套件（§16.1），与存储后端无关
 kernel/           微内核：启动、异常、页表、FDT、串口；scripts/ 下是 QEMU 启动与测试脚本
 ```
 

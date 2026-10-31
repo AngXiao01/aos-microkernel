@@ -9,7 +9,7 @@ test-core:
 
 # The core libraries must build for the bare-metal userspace target.
 check-nostd:
-	cargo build --workspace --target aarch64-unknown-none
+	cargo build -p aos-types -p aos-log -p aos-branch --target aarch64-unknown-none
 
 # In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry).
 test-kernel:

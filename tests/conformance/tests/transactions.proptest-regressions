@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a5d013c6946710d71174fa076d21e5ebdf9485c8b45bcf0997b8b74049a93eb6 # shrinks to (objects, plans, order) = (2, [TxPlan { reads: [1], writes: [] }, TxPlan { reads: [], writes: [1] }], [0, 1, 1, 0])

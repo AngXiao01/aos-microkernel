@@ -1,0 +1,15 @@
+[package]
+name = "aos-conformance"
+description = "Core API conformance suite (SPEC §16.1), independent of the storage backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../../core/aos-types" }
+aos-log = { path = "../../core/aos-log" }
+aos-branch = { path = "../../core/aos-branch" }
+
+[dev-dependencies]
+proptest.workspace = true

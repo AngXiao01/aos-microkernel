@@ -3,6 +3,31 @@
 version = 4
 
 [[package]]
+name = "aos-branch"
+version = "0.1.0"
+dependencies = [
+ "aos-log",
+ "aos-types",
+]
+
+[[package]]
+name = "aos-conformance"
+version = "0.1.0"
+dependencies = [
+ "aos-branch",
+ "aos-log",
+ "aos-types",
+ "proptest",
+]
+
+[[package]]
+name = "aos-log"
+version = "0.1.0"
+dependencies = [
+ "aos-types",
+]
+
+[[package]]
 name = "aos-types"
 version = "0.1.0"
 dependencies = [

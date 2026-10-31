@@ -1,0 +1,11 @@
+[package]
+name = "aos-branch"
+description = "Transactions, branches, diffs and undo over the AOS log (SPEC §7, M1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aos-types = { path = "../aos-types" }
+aos-log = { path = "../aos-log" }

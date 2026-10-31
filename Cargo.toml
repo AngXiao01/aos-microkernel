@@ -2,7 +2,7 @@
 # kernel/ because it builds for a fixed bare-metal target (see DECISIONS.md).
 [workspace]
 resolver = "3"
-members = ["core/aos-types"]
+members = ["core/aos-types", "core/aos-log", "core/aos-branch", "tests/conformance"]
 exclude = ["kernel"]
 
 [workspace.package]

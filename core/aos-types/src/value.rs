@@ -87,11 +87,11 @@ impl FromCbor for ObjectRef {
     }
 }
 
-pub(crate) fn ulid_to_cbor(id: Ulid) -> Cbor {
+pub fn ulid_to_cbor(id: Ulid) -> Cbor {
     Cbor::Bytes(id.to_bytes().to_vec())
 }
 
-pub(crate) fn ulid_from_cbor(value: &Cbor) -> Result<Ulid, FormatError> {
+pub fn ulid_from_cbor(value: &Cbor) -> Result<Ulid, FormatError> {
     let bytes: [u8; 16] = value
         .as_bytes()
         .ok_or(FormatError::WrongType("ulid"))?
@@ -100,11 +100,11 @@ pub(crate) fn ulid_from_cbor(value: &Cbor) -> Result<Ulid, FormatError> {
     Ok(Ulid::from_bytes(bytes))
 }
 
-pub(crate) fn hash_to_cbor(hash: &Hash256) -> Cbor {
+pub fn hash_to_cbor(hash: &Hash256) -> Cbor {
     Cbor::Bytes(hash.0.to_vec())
 }
 
-pub(crate) fn hash_from_cbor(value: &Cbor) -> Result<Hash256, FormatError> {
+pub fn hash_from_cbor(value: &Cbor) -> Result<Hash256, FormatError> {
     let bytes: [u8; 32] = value
         .as_bytes()
         .ok_or(FormatError::WrongType("sha256 hash"))?

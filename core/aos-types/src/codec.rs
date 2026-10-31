@@ -60,52 +60,53 @@ pub fn from_bytes<T: FromCbor + ToCbor>(bytes: &[u8]) -> Result<T, FormatError> 
 }
 
 /// Builds a structure map.
-pub(crate) struct MapBuilder(CborMap);
+#[derive(Default)]
+pub struct MapBuilder(CborMap);
 
 impl MapBuilder {
-    pub(crate) fn new() -> MapBuilder {
+    pub fn new() -> MapBuilder {
         MapBuilder(CborMap::new())
     }
 
-    pub(crate) fn put(mut self, key: &str, value: Cbor) -> MapBuilder {
+    pub fn put(mut self, key: &str, value: Cbor) -> MapBuilder {
         self.0.insert(Cbor::text(key), value);
         self
     }
 
-    pub(crate) fn put_opt(self, key: &str, value: Option<Cbor>) -> MapBuilder {
+    pub fn put_opt(self, key: &str, value: Option<Cbor>) -> MapBuilder {
         match value {
             Some(v) => self.put(key, v),
             None => self,
         }
     }
 
-    pub(crate) fn build(self) -> Cbor {
+    pub fn build(self) -> Cbor {
         Cbor::Map(self.0)
     }
 }
 
 /// Reads a structure map, tracking which keys were consumed.
-pub(crate) struct MapReader<'a> {
+pub struct MapReader<'a> {
     map: &'a CborMap,
     seen: Vec<&'static str>,
 }
 
 impl<'a> MapReader<'a> {
-    pub(crate) fn new(value: &'a Cbor, what: &'static str) -> Result<MapReader<'a>, FormatError> {
+    pub fn new(value: &'a Cbor, what: &'static str) -> Result<MapReader<'a>, FormatError> {
         let map = value.as_map().ok_or(FormatError::WrongType(what))?;
         Ok(MapReader { map, seen: Vec::new() })
     }
 
-    pub(crate) fn opt(&mut self, key: &'static str) -> Option<&'a Cbor> {
+    pub fn opt(&mut self, key: &'static str) -> Option<&'a Cbor> {
         self.seen.push(key);
         self.map.get_str(key)
     }
 
-    pub(crate) fn req(&mut self, key: &'static str) -> Result<&'a Cbor, FormatError> {
+    pub fn req(&mut self, key: &'static str) -> Result<&'a Cbor, FormatError> {
         self.opt(key).ok_or(FormatError::MissingKey(key))
     }
 
-    pub(crate) fn finish(self) -> Result<(), FormatError> {
+    pub fn finish(self) -> Result<(), FormatError> {
         for (key, _) in self.map.iter() {
             match key.as_text() {
                 Some(k) if self.seen.contains(&k) => {}
@@ -117,35 +118,35 @@ impl<'a> MapReader<'a> {
     }
 }
 
-pub(crate) fn text<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a str, FormatError> {
+pub fn text<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a str, FormatError> {
     value.as_text().ok_or(FormatError::WrongType(what))
 }
 
-pub(crate) fn uint(value: &Cbor, what: &'static str) -> Result<u64, FormatError> {
+pub fn uint(value: &Cbor, what: &'static str) -> Result<u64, FormatError> {
     value.as_u64().ok_or(FormatError::WrongType(what))
 }
 
-pub(crate) fn int(value: &Cbor, what: &'static str) -> Result<i64, FormatError> {
+pub fn int(value: &Cbor, what: &'static str) -> Result<i64, FormatError> {
     match value {
         Cbor::Unsigned(_) | Cbor::Negative(_) => value.as_i64().ok_or(FormatError::InvalidValue(what)),
         _ => Err(FormatError::WrongType(what)),
     }
 }
 
-pub(crate) fn boolean(value: &Cbor, what: &'static str) -> Result<bool, FormatError> {
+pub fn boolean(value: &Cbor, what: &'static str) -> Result<bool, FormatError> {
     value.as_bool().ok_or(FormatError::WrongType(what))
 }
 
-pub(crate) fn array<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a [Cbor], FormatError> {
+pub fn array<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a [Cbor], FormatError> {
     value.as_array().ok_or(FormatError::WrongType(what))
 }
 
-pub(crate) fn map<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a CborMap, FormatError> {
+pub fn map<'a>(value: &'a Cbor, what: &'static str) -> Result<&'a CborMap, FormatError> {
     value.as_map().ok_or(FormatError::WrongType(what))
 }
 
 /// A map from text keys, in deterministic order.
-pub(crate) fn text_map<'a, V: 'a, I>(entries: I, f: impl Fn(&V) -> Cbor) -> Cbor
+pub fn text_map<'a, V: 'a, I>(entries: I, f: impl Fn(&V) -> Cbor) -> Cbor
 where
     I: IntoIterator<Item = (&'a String, &'a V)>,
 {
