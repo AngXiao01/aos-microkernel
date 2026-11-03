@@ -257,7 +257,7 @@ pub struct DeviceInfo {
 }
 
 pub const MAX_UNTYPED: usize = 64;
-pub const MAX_MODULES: usize = 8;
+pub const MAX_MODULES: usize = 12;
 
 #[repr(C)]
 #[derive(Clone, Copy)]

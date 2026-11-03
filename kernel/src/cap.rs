@@ -28,6 +28,10 @@ impl Rights {
     pub const GRANT: Rights = Rights(rights::GRANT as u8);
     pub const ALL: Rights = Rights(rights::ALL as u8);
 
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
     pub const fn contains(self, other: Rights) -> bool {
         self.0 & other.0 == other.0
     }

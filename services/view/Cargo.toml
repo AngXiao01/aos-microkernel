@@ -1,0 +1,17 @@
+[package]
+name = "aos-view"
+description = "View server stub: inbound listen capability only (SPEC §B4, BS6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "view"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+aos-rt = { path = "../rt" }
+
