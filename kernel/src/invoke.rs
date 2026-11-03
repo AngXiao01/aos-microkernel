@@ -322,6 +322,10 @@ pub struct Holdings {
     pub endpoints: u32,
     pub threads: u32,
     pub debug: bool,
+    /// `(badge, rights bits)` of the first few endpoint capabilities. Badge `0xE6` with the
+    /// SEND bit is the netstack outbound endpoint (BS1: only egress may hold it).
+    pub ep: [(u64, u8); 4],
+    pub ep_n: u8,
 }
 
 pub fn holdings(cnode: KPtr<CNode>) -> Holdings {
@@ -335,7 +339,13 @@ pub fn holdings(cnode: KPtr<CNode>) -> Holdings {
                 h.untyped_bytes += 1 << size_bits;
             }
             Cap::Frame { .. } => h.frames += 1,
-            Cap::Endpoint { .. } => h.endpoints += 1,
+            Cap::Endpoint { badge, rights, .. } => {
+                h.endpoints += 1;
+                if (h.ep_n as usize) < h.ep.len() {
+                    h.ep[h.ep_n as usize] = (badge, rights.bits());
+                    h.ep_n += 1;
+                }
+            }
             Cap::Thread(_) => h.threads += 1,
             Cap::Debug => h.debug = true,
             _ => {}
@@ -354,6 +364,23 @@ pub fn dump(k: &Kernel) {
             (th.id, th.state, th.cnode())
         };
         let h = cnode.map(holdings).unwrap_or_default();
-        kprintln!("caps: thread {id} {state:?}: {h:?}");
+        let outbound = (0..h.ep_n as usize).any(|i| h.ep[i].0 == 0xE6 && h.ep[i].1 & rights::SEND as u8 != 0);
+        let b = |i: usize| if i < h.ep_n as usize { h.ep[i].0 } else { 0 };
+        let r = |i: usize| if i < h.ep_n as usize { h.ep[i].1 } else { 0 };
+        // One line per thread. Badge 0xE6 is printed in hex so the platform test can count
+        // send-capabilities to the outbound endpoint (BS1: egress alone).
+        kprintln!(
+            "caps: thread {id} {state:?}: caps={} endpoints={} outbound_send={outbound} badges={:x}:{:x},{:x}:{:x},{:x}:{:x},{:x}:{:x}",
+            h.caps,
+            h.endpoints,
+            b(0),
+            r(0),
+            b(1),
+            r(1),
+            b(2),
+            r(2),
+            b(3),
+            r(3),
+        );
     }
 }
