@@ -1,5 +1,5 @@
 # Entry points for humans and CI. Each target is also runnable by hand (see README.md).
-.PHONY: test test-core check-nostd test-kernel lint run gdb
+.PHONY: test test-core check-nostd test-kernel test-b3 test-b4 lint run gdb
 
 test: test-core check-nostd test-kernel
 
@@ -17,6 +17,13 @@ test-b3:
 	cd kernel && cargo build --release --features debug-syscalls
 	cargo build -p aos-platform --release
 	./target/release/aos-platform
+
+# B-4: public TLS handshake from the egress gateway, plus BS1, BS6 and BS8.
+# Requires the debug kernel and QEMU user-net (the guest opens example.com:443).
+test-b4:
+	cd kernel && cargo build --release --features debug-syscalls
+	cargo build -p aos-platform --release --bin b4
+	./target/release/b4
 
 # In-kernel unit tests in QEMU (two configurations: EL1 entry, EL2 entry), including the
 # B-1 tests that run services/ktest-user.

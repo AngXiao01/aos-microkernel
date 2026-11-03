@@ -68,18 +68,31 @@ macro_rules! service {
 
 /// The programs the root task receives (built from services/ by build.rs).
 #[cfg(not(feature = "ktest"))]
-pub static BOOT_MODULES: [root::Module; 5] =
-    [service!("root"), service!("memory"), service!("blk"), service!("hostlink"), service!("storage")];
-
-/// The kernel tests also carry the user-space test program. blk/hostlink/storage are present
-/// but the root task only starts them when the machine actually has those devices.
-#[cfg(feature = "ktest")]
-pub static BOOT_MODULES: [root::Module; 6] = [
+pub static BOOT_MODULES: [root::Module; 9] = [
     service!("root"),
     service!("memory"),
     service!("blk"),
     service!("hostlink"),
     service!("storage"),
+    service!("net"),
+    service!("netstack"),
+    service!("egress"),
+    service!("view"),
+];
+
+/// The kernel tests also carry the user-space test program. Device servers start only when
+/// the machine actually has those devices.
+#[cfg(feature = "ktest")]
+pub static BOOT_MODULES: [root::Module; 10] = [
+    service!("root"),
+    service!("memory"),
+    service!("blk"),
+    service!("hostlink"),
+    service!("storage"),
+    service!("net"),
+    service!("netstack"),
+    service!("egress"),
+    service!("view"),
     service!("ktest-user"),
 ];
 
@@ -119,7 +132,8 @@ extern "C" fn kernel_main(dtb_pa: usize) -> ! {
         }
         let magic = read_mmio(node.base);
         let id = read_mmio(node.base + 8);
-        if magic == 0x7472_6976 && (id == 2 || id == 3) {
+        // 1 = net, 2 = blk, 3 = console. Empty transports report id 0.
+        if magic == 0x7472_6976 && (id == 1 || id == 2 || id == 3) {
             found[nfound] = device::BootDev { kind: id, base: node.base, irq: node.irq };
             kprintln!("virtio: id {id} at {:#x} irq {}", node.base, node.irq);
             nfound += 1;

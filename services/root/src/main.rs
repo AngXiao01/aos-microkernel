@@ -11,8 +11,11 @@ use aos_rt::abi::{
     BOOT_INFO_MAGIC, BootInfo, CNODE_SLOTS, Error, ModuleInfo, ktest, ktest_b2, layout, method, object, rights,
     root_slots,
 };
-use aos_rt::cap::{configure, copy, delete, irq_bind, map, mint, move_cap, resume, retype, unmap, write_registers};
+use aos_rt::cap::{
+    configure, copy, delete, dump_caps, irq_bind, map, mint, move_cap, resume, retype, unmap, write_registers,
+};
 use aos_rt::println;
+use aos_rt::proto;
 
 aos_rt::entry!(main);
 
@@ -158,10 +161,12 @@ fn run(info: &BootInfo) -> Result<(), Error> {
     let untyped = &info.untyped[..info.untyped_count as usize];
     // Build with the smallest Untyped of at least 2 MiB; everything else goes to the
     // memory server. What remains of the bootstrap pool is deleted with the root task.
+    // virtio-net brings four more processes; the 2 MiB bootstrap pool is no longer enough.
+    let min_bits = if info.devices.iter().any(|d| d.kind == 1) { 22 } else { 21 };
     let (pool_index, _) = untyped
         .iter()
         .enumerate()
-        .filter(|(_, u)| u.size_bits >= 21)
+        .filter(|(_, u)| u.size_bits >= min_bits)
         .min_by_key(|(_, u)| u.size_bits)
         .ok_or(Error::NoMemory)?;
     let pool = root_slots::FIRST_UNTYPED + pool_index as u64;
@@ -184,6 +189,10 @@ fn run(info: &BootInfo) -> Result<(), Error> {
     // virtio-blk, virtio-console and the storage server. Absent when the machine has no
     // disk (the kernel tests); BS2 is unchanged in that case.
     start_storage(info, &mut slots, pool, endpoint)?;
+    start_net(info, &mut slots, pool, endpoint)?;
+    // Children are ready but have not run (root is higher priority). Their capability
+    // spaces already hold what they will run with, which is what BS1 audits.
+    let _ = dump_caps(root_slots::DEBUG);
 
     // When the kernel tests boot us, they include a client for the memory server.
     if let Some(image) = module(info, "ktest-user") {
@@ -263,6 +272,51 @@ fn start_storage(info: &BootInfo, slots: &mut Slots, pool: u64, mem_ep: u64) -> 
     resume(storage.thread)?;
     move_cap(storage.cnode, storage.thread, CHILD_THREAD)?;
     println!("root: blk, hostlink and storage started");
+    Ok(())
+}
+
+fn start_net(info: &BootInfo, slots: &mut Slots, pool: u64, mem_ep: u64) -> Result<(), Error> {
+    let Some(dev) = info.devices[..info.device_count as usize].iter().find(|d| d.kind == 1) else {
+        return Ok(());
+    };
+    let Some(image) = module(info, "net") else { return Ok(()) };
+    let ntfn = slots.take()?;
+    let nic_ep = slots.take()?;
+    let out_ep = slots.take()?;
+    let in_ep = slots.take()?;
+    retype(pool, object::NOTIFICATION, ntfn, 1)?;
+    retype(pool, object::ENDPOINT, nic_ep, 1)?;
+    retype(pool, object::ENDPOINT, out_ep, 1)?;
+    retype(pool, object::ENDPOINT, in_ep, 1)?;
+    irq_bind(dev.irq_slot, ntfn)?;
+
+    let nic = spawn(slots, pool, image, 188, [dev.base & 0xfff, 0])?;
+    hand_driver(&nic, dev.mmio_slot, dev.irq_slot, nic_ep, mem_ep, ntfn)?;
+    resume(nic.thread)?;
+    move_cap(nic.cnode, nic.thread, CHILD_THREAD)?;
+
+    let netstack = spawn(slots, pool, module(info, "netstack").ok_or(Error::InvalidArgument)?, 175, [0, 0])?;
+    copy(netstack.cnode, netstack.space, 4, rights::ALL)?;
+    mint(netstack.cnode, nic_ep, 5, rights::SEND | rights::GRANT, 0)?;
+    copy(netstack.cnode, out_ep, 1, rights::RECV)?;
+    copy(netstack.cnode, in_ep, 7, rights::RECV)?;
+    mint(netstack.cnode, mem_ep, 6, rights::SEND, 0)?;
+    resume(netstack.thread)?;
+    move_cap(netstack.cnode, netstack.thread, CHILD_THREAD)?;
+
+    let egress = spawn(slots, pool, module(info, "egress").ok_or(Error::InvalidArgument)?, 165, [0, 0])?;
+    copy(egress.cnode, egress.space, 4, rights::ALL)?;
+    mint(egress.cnode, out_ep, 1, rights::SEND | rights::GRANT, proto::stack::BADGE_OUTBOUND)?;
+    mint(egress.cnode, mem_ep, 6, rights::SEND, 0)?;
+    resume(egress.thread)?;
+    move_cap(egress.cnode, egress.thread, CHILD_THREAD)?;
+
+    let view = spawn(slots, pool, module(info, "view").ok_or(Error::InvalidArgument)?, 140, [0, 0])?;
+    copy(view.cnode, view.space, 4, rights::ALL)?;
+    mint(view.cnode, in_ep, 1, rights::SEND, proto::stack::BADGE_INBOUND)?;
+    resume(view.thread)?;
+    move_cap(view.cnode, view.thread, CHILD_THREAD)?;
+    println!("root: net, netstack, egress and view started");
     Ok(())
 }
 
