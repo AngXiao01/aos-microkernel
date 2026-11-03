@@ -33,14 +33,13 @@ M4 至 M8 尚未开始。
 | B-1 线程、调度、地址空间、同步 IPC | 完成 | `make test-kernel`：IPC ping-pong（2000 次往返，16 字消息）、三线程抢占下的全寄存器（含 FP/SIMD、FPCR）完整性、超时、故障隔离、通知、FIFO、权限 |
 | B-2 能力系统（派生、撤销）、root task 分发、memory server | 完成 | `make test-kernel`：能力单元测试（retype、衰减、派生树、对象销毁、撤销 Untyped、帧映射）与 BS2（root 分发后退出，memory server 发放帧，无进程持有全部 Untyped） |
 | B-3 virtio-blk 驱动、storage server、核心 crate 接到磁盘上 | 完成 | `make test-b3`：一致性套件里的日志、事务、分支、撤销，经 virtio-blk 上的存储服务跑通；BS4（篡改日志后进入只读安全模式）、BS5（断电后未完成的写入不生效） |
+| B-4 virtio-net、netstack、egress gateway，以及 TLS 技术验证 | 完成 | `make test-b4`：egress 在客户机里与公网 HTTPS（example.com:443）完成 TLS 握手；BS1（出站 SEND 只在 egress）、BS6（view 用入站能力主动连接被拒绝）、BS8（审批后替换载荷被拒绝） |
 
-B-4 及之后尚未进入 `main`。
+B-5 及之后尚未进入 `main`。
 
 ## 下一步
 
-下一档是 **B-4**（SPEC §B12；还没有合入 `main`）。先做 TLS 技术验证（§B7），再做 virtio-net、netstack 和 egress gateway。验收：与一个公网 HTTPS 服务完成握手；BS1、BS6、BS8。
-
-B-4 之后是 **B-5**：wasmi 动作运行时、能力令牌、策略、开发确认器。验收：一致性套件全部；BS3、BS7。宿主机上的 M2、M3 已经覆盖这些库的核心测试；B-5 要求的是它们在客户机里跑通，并且一致性套件全部加上 BS3、BS7。
+下一档是 **B-5**（SPEC §B12）：wasmi 动作运行时、能力令牌、策略、开发确认器。验收：一致性套件全部；BS3、BS7。宿主机上的 M2、M3 已经覆盖这些库的核心测试；B-5 要求的是它们在客户机里跑通，并且一致性套件全部加上 BS3、BS7。
 
 再往后的 M4–M8 和 B-6–B-8 以 SPEC §17、§B12 为准。本仓库没有另一份路线图。
 
@@ -54,11 +53,12 @@ apt-get install -y qemu-system-arm gdb-multiarch
 
 | 命令 | 作用 |
 |---|---|
-| `make test` | 核心库测试、`no_std` 构建检查、QEMU 内核单测。不含下面的 B-3 磁盘验收 |
+| `make test` | 核心库测试、`no_std` 构建检查、QEMU 内核单测。不含下面的 B-3、B-4 验收 |
 | `make test-core` | 核心库在宿主机上的单元测试与属性测试 |
 | `make check-nostd` | 核心库为 `aarch64-unknown-none` 构建 |
 | `make test-kernel` | `kernel/scripts/ktest.sh`：构建带测试的内核并在 QEMU 中运行。日志在 `kernel/target/ktest/` |
 | `make test-b3` | B-3 验收。先构建带 `debug-syscalls` 的内核，再由 `tests/platform` 挂上 virtio-blk 磁盘和 virtio-console，跑日志/事务/分支/撤销以及 BS4、BS5 |
+| `make test-b4` | B-4 验收。同样先构建调试内核，再用 QEMU user-net 让 egress 连接 example.com:443，检查 TLS 握手以及 BS1、BS6、BS8。客户机需要能访问公网 |
 | `make lint` | rustfmt 与 clippy（警告视为错误） |
 | `make run` | 在 QEMU 中启动内核，串口接在终端上。`Ctrl-A X` 退出。这条命令不挂磁盘，存储服务不会起来 |
 | `make gdb` | 同 `make run`，但在 `:1234` 等待调试器 |
@@ -69,7 +69,7 @@ apt-get install -y qemu-system-arm gdb-multiarch
 gdb-multiarch kernel/target/aarch64-unknown-none-softfloat/release/aos-kernel -ex 'target remote :1234' -ex 'break kernel_main' -ex continue
 ```
 
-`make run` 看到的是内核启动横幅、内存与中断初始化，以及 root task 的分发结果。要看磁盘上的日志、事务和 BS4/BS5，用 `make test-b3`。
+`make run` 看到的是内核启动横幅、内存与中断初始化，以及 root task 的分发结果。这条命令不挂磁盘，也不挂网卡。要看磁盘上的日志、事务和 BS4/BS5，用 `make test-b3`。要看公网 TLS 握手和 BS1、BS6、BS8，用 `make test-b4`。
 
 ## 布局
 
@@ -85,12 +85,12 @@ core/aos-confirm/  审批请求、确认器签名与一次性校验、开发确�
 core/aos-egress/   出口闸门：载荷重算、审批匹配、只执行一次（no_std）
 core/aos-storage/  存储服务用的磁盘卷：超级块、只追加日志、内容寻址区（no_std）
 tests/conformance/ 核心一致性套件（§16.1），与存储后端无关
-tests/platform/    B-3 的宿主机验收：virtio-blk 上的一致性子集，以及 BS4、BS5
+tests/platform/    宿主机验收：B-3（virtio-blk 上的一致性子集，BS4、BS5）和 B-4（`b4`：公网 TLS，BS1、BS6、BS8）
 actions/           WASM 动作：sdk（guest 侧库）、test-script（运行时测试用的脚本动作）
 kernel/            微内核：启动、异常、页表、FDT、GIC、定时器、线程、调度、IPC、virtio 设备发现
 kernel/abi/        内核与用户态共用的 ABI（系统调用号、消息布局、用户地址布局）
 kernel/scripts/    QEMU 启动（qemu.sh）与内核测试（ktest.sh）
-services/          用户态：rt、root、memory、blk、hostlink、storage、virtio，以及内核测试用的 ktest-user
+services/          用户态：rt、root、memory、blk、hostlink、storage、virtio、net、netstack、egress、view（入站侧，供 BS6），以及内核测试用的 ktest-user
 ```
 
-根目录和 `kernel/`、`services/`、`actions/` 是分开的 Cargo workspace。§18 里的 `compute-worker/`、`view/`、`confirmer-ios/` 留到对应里程碑再加。
+根目录和 `kernel/`、`services/`、`actions/` 是分开的 Cargo workspace。§18 里的 `compute-worker/`、人的界面 `view/`、`confirmer-ios/` 留到对应里程碑再加。`services/view` 只是客户机里的入站进程，不是那套 TypeScript 界面。
