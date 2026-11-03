@@ -6,6 +6,8 @@ AOS（agent-native OS）的微内核版：从零编写的 Rust 能力式微内�
 
 本仓库自成一体。唯一的规格是 [`SPEC.md`](SPEC.md)：第一部分是系统语义，第二部分是平台实现。规格没有写明的实现选择记在 [`DECISIONS.md`](DECISIONS.md)。规格内部的矛盾与缺口记在 [`QUESTIONS.md`](QUESTIONS.md)。§B4 的能力分配表就是安全规格，任何偏离都必须写进 `DECISIONS.md`。
 
+许可证是 [MIT](LICENSE)。
+
 ## 当前进度
 
 下面只写 `main` 上已经合入的范围。核心里程碑见 SPEC §17，平台里程碑见 SPEC §B12，两套交错推进。没进 `main` 的工作不记成已发布。
